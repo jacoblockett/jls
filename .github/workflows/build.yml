@@ -1,11 +1,6 @@
 name: Build
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - package.json
   schedule:
     - cron: '0 23 * * *'
       timezone: 'America/New_York'
@@ -57,30 +52,17 @@ jobs:
           mode=nightly
           if [[ '${{ github.event_name }}' == 'workflow_dispatch' ]]; then
             mode='${{ inputs.action }}'
-          elif [[ '${{ github.event_name }}' == 'push' ]]; then
-            mode=stable
           fi
           if [[ '${{ github.ref }}' != 'refs/heads/main' ]]; then
             echo 'Build and release automation may only run from main.' >&2
             exit 1
           fi
 
-          package_version="$(jq -er '.version' package.json)"
-          if [[ ! "$package_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "JLS package version must be plain semver: $package_version" >&2
+          manifest_version="$(jq -er '.version' manifest.json)"
+          if [[ ! "$manifest_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "JLS manifest version must be plain semver: $manifest_version" >&2
             exit 1
           fi
-
-          semver_gt() {
-            local lhs="$1"
-            local rhs="$2"
-            local l_major l_minor l_patch r_major r_minor r_patch
-            IFS=. read -r l_major l_minor l_patch <<< "$lhs"
-            IFS=. read -r r_major r_minor r_patch <<< "$rhs"
-            if (( 10#$l_major != 10#$r_major )); then (( 10#$l_major > 10#$r_major )); return; fi
-            if (( 10#$l_minor != 10#$r_minor )); then (( 10#$l_minor > 10#$r_minor )); return; fi
-            (( 10#$l_patch > 10#$r_patch ))
-          }
 
           should_build=true
           release_tag=dev
@@ -89,49 +71,27 @@ jobs:
             if [[ "$should_build" == true && "$force" != true ]]; then
               git fetch origin --tags --force
               if git rev-parse -q --verify refs/tags/nightly >/dev/null; then
-                mapfile -t files < <(git diff --name-only nightly..HEAD -- .github/workflows/build.yml src scripts tests package.json bun.lock catalog.json)
+                mapfile -t files < <(git diff --name-only nightly..HEAD -- .github/workflows/build.yml .github/workflows/version-check.yml manifest.json src scripts tests package.json bun.lock catalog.json)
                 if (( ${#files[@]} == 0 )); then should_build=false; fi
               fi
             fi
             release_tag=nightly
           elif [[ "$mode" == stable ]]; then
-            if [[ '${{ github.event_name }}' == 'push' ]]; then
-              before='${{ github.event.before }}'
-              if [[ "$before" =~ ^0+$ ]]; then
-                echo 'Automatic stable release cannot determine the previous commit version.' >&2
-                exit 1
-              fi
-              previous_version="$(git show "$before:package.json" | jq -er '.version')"
-              if [[ ! "$previous_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                echo "Previous JLS package version must be plain semver: $previous_version" >&2
-                exit 1
-              fi
-              if [[ "$package_version" == "$previous_version" ]]; then
-                should_build=false
-              elif ! semver_gt "$package_version" "$previous_version"; then
-                echo "JLS version must increase for an automatic stable release: $previous_version -> $package_version." >&2
-                exit 1
-              fi
-              requested_version="$package_version"
-            else
-              requested_version='${{ inputs.version }}'
-              if [[ ! "$requested_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                echo 'Stable releases require an explicit plain-semver version input, for example 0.1.0.' >&2
-                exit 1
-              fi
-              if [[ "$requested_version" != "$package_version" ]]; then
-                echo "Requested stable version $requested_version does not match package.json version $package_version." >&2
-                exit 1
-              fi
+            requested_version='${{ inputs.version }}'
+            if [[ ! "$requested_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo 'Stable releases require an explicit plain-semver version input, for example 0.1.0.' >&2
+              exit 1
+            fi
+            if [[ "$requested_version" != "$manifest_version" ]]; then
+              echo "Requested stable version $requested_version does not match manifest.json version $manifest_version." >&2
+              exit 1
             fi
 
-            if [[ "$should_build" == true ]]; then
-              release_tag="v$requested_version"
-              git fetch origin --tags --force
-              if git rev-parse -q --verify "refs/tags/$release_tag" >/dev/null; then
-                echo "Tag $release_tag already exists." >&2
-                exit 1
-              fi
+            release_tag="v$requested_version"
+            git fetch origin --tags --force
+            if git rev-parse -q --verify "refs/tags/$release_tag" >/dev/null; then
+              echo "Tag $release_tag already exists." >&2
+              exit 1
             fi
           elif [[ "$mode" != build ]]; then
             echo "Unknown build mode: $mode" >&2
