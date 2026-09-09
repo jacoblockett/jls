@@ -1,9 +1,11 @@
-
 {
   "format": 1,
   "skills": {
     "map": {
       "manifest_url": "https://github.com/jacoblockett/jls-map/releases/latest/download/manifest.json"
+    },
+    "beads-design": {
+      "manifest_url": "https://github.com/jacoblockett/jls-beads/releases/latest/download/manifest.json"
     }
   }
 }
