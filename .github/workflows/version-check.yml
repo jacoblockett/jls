@@ -1,0 +1,64 @@
+name: Version Check
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - manifest.json
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compare manifest version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          before='${{ github.event.before }}'
+          if [[ "$before" =~ ^0+$ ]]; then
+            echo 'Cannot determine the previous manifest version.' >&2
+            exit 1
+          fi
+
+          previous="$(git show "$before:manifest.json" | jq -er '.version')"
+          current="$(jq -er '.version' manifest.json)"
+
+          if [[ ! "$previous" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || [[ ! "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Manifest versions must be plain semver: $previous -> $current" >&2
+            exit 1
+          fi
+
+          if [[ "$current" == "$previous" ]]; then
+            echo "Version unchanged at $current; no build workflow dispatched."
+            exit 0
+          fi
+
+          semver_gt() {
+            local lhs="$1" rhs="$2"
+            local l_major l_minor l_patch r_major r_minor r_patch
+            IFS=. read -r l_major l_minor l_patch <<< "$lhs"
+            IFS=. read -r r_major r_minor r_patch <<< "$rhs"
+            if (( 10#$l_major != 10#$r_major )); then (( 10#$l_major > 10#$r_major )); return; fi
+            if (( 10#$l_minor != 10#$r_minor )); then (( 10#$l_minor > 10#$r_minor )); return; fi
+            (( 10#$l_patch > 10#$r_patch ))
+          }
+
+          if ! semver_gt "$current" "$previous"; then
+            echo "JLS version must increase: $previous -> $current" >&2
+            exit 1
+          fi
+
+          gh workflow run build.yml --ref main -f action=stable -f version="$current"
+          echo "Dispatched stable build for $current."
