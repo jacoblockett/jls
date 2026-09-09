@@ -4,8 +4,8 @@
     "map": {
       "manifest_url": "https://github.com/jacoblockett/jls-map/releases/latest/download/manifest.json"
     },
-    "beads-design": {
-      "manifest_url": "https://github.com/jacoblockett/jls-beads/releases/latest/download/manifest.json"
+    "tasks": {
+      "manifest_url": "https://github.com/jacoblockett/jls-tasks/releases/latest/download/manifest.json"
     }
   }
 }
