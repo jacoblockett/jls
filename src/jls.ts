@@ -44,9 +44,9 @@ import {
 } from './installer-updater'
 import { renderResource } from './resource-render'
 import { compiledTarget, installerAssetName } from './targets'
-import packageJson from '../package.json'
+import installerManifest from '../manifest.json'
 
-const VERSION = packageJson.version
+const VERSION = installerManifest.version
 const PROMPTS_VERSION = '1.7.0'
 const isWindows = platform() === 'win32'
 const HOME = Symbol('jls-home')
