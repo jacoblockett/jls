@@ -8,9 +8,9 @@ JLS is a cross-platform installer for a curated set of AI coding-agent skills. I
 
 Map is a local, durable intent graph for preserving project goals, open questions, decisions, facts, and rationale across long-running agent work. It provides a structured clarification workflow so important context survives beyond a single conversation or context window.
 
-### [Beads Design](https://github.com/jacoblockett/jls-beads)
+### [Tasks](https://github.com/jacoblockett/jls-tasks)
 
-Beads Design exhaustively converts authoritative goals, specifications, plans, and structured source material into small, self-contained Beads issues while preserving source coverage, provenance, constraints, and dependencies.
+Tasks exhaustively converts authoritative goals, specifications, plans, and structured source material into small, self-contained work items while preserving source coverage, provenance, constraints, and dependencies. It currently uses Beads as its native task backend.
 
 ## Install
 
