@@ -14,6 +14,7 @@ import {
 } from 'node:fs'
 import { homedir, platform } from 'node:os'
 import { basename, dirname, isAbsolute, join, normalize, resolve } from 'node:path'
+import { styleText } from 'node:util'
 import { exclusiveMultiselect, type ExclusiveOption } from './exclusive-multiselect'
 import {
   HARNESS_ADAPTERS,
@@ -123,7 +124,7 @@ function checked<T>(value: T | symbol): T | symbol {
   return value
 }
 
-function ensureIntro(state: WizardState, title = 'jls'): void {
+function ensureIntro(state: WizardState, title = `JLS Installer ${styleText('dim', `v${VERSION}`)}`): void {
   if (!state.shown) {
     prompts.intro(title)
     state.shown = true
@@ -716,7 +717,7 @@ function configureInstruction(
   const paths = agentPaths(agent, scope)
   if (instructions) {
     const cli = manifest.runtime ? runtimeCliPath(manifest, scope) : undefined
-    const fragment = renderInstructionFragment(pkg, cli)
+    const fragment = renderInstructionFragment(pkg, runtime.cli)
     if (!fragment) throw new Error(`${manifest.name} does not provide managed instructions`)
     managedBlock(paths.instruction, manifest.name, fragment)
   } else {
