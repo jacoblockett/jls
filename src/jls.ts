@@ -717,7 +717,7 @@ function configureInstruction(
   const paths = agentPaths(agent, scope)
   if (instructions) {
     const cli = manifest.runtime ? runtimeCliPath(manifest, scope) : undefined
-    const fragment = renderInstructionFragment(pkg, runtime.cli)
+    const fragment = renderInstructionFragment(pkg, cli)
     if (!fragment) throw new Error(`${manifest.name} does not provide managed instructions`)
     managedBlock(paths.instruction, manifest.name, fragment)
   } else {
