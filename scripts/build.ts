@@ -67,6 +67,8 @@ const installerBuild = Bun.spawnSync([
   join(repo, 'src', 'jls.ts'),
   '--compile',
   `--target=${buildTarget.bunCompileTarget}`,
+  '--define',
+  `JLS_COMPILED_TARGET=${JSON.stringify(buildTarget.key)}`,
   '--outfile',
   output,
 ], {
