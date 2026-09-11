@@ -996,7 +996,7 @@ function uninstallSummary(groups: InstallGroup[]): string {
   const harnessNames = [...new Set(groups.flatMap((group) => group.targets.map((target) => agentLabel(target.agent))))]
   return [
     'Skills to uninstall',
-    indentedLineList(skillNames),
+    indentedCommaList(skillNames),
     '',
     'Uninstall location',
     indentedLineList(locations),
