@@ -43,7 +43,7 @@ import {
   type SkillPackageManifest,
 } from './installer-updater'
 import { renderResource } from './resource-render'
-import { compiledTarget, installerAssetName } from './targets'
+import { compiledTarget } from './targets'
 import installerManifest from '../manifest.json'
 
 const VERSION = installerManifest.version
@@ -996,7 +996,7 @@ function uninstallSummary(groups: InstallGroup[]): string {
   const harnessNames = [...new Set(groups.flatMap((group) => group.targets.map((target) => agentLabel(target.agent))))]
   return [
     'Skills to uninstall',
-    indentedCommaList(skillNames),
+    indentedLineList(skillNames),
     '',
     'Uninstall location',
     indentedLineList(locations),
@@ -1505,13 +1505,10 @@ async function removeSkillGeneratedDataWizard(state: WizardState): Promise<NavRe
 }
 
 function installerExecutable(): string {
-  const executable = canonicalPath(process.execPath)
-  const name = basename(executable).toLowerCase()
-  const expected = installerAssetName(compiledTarget()).toLowerCase()
-  if (name !== expected) {
+  if (!Bun.isStandaloneExecutable) {
     throw new Error('installer management is only available from the compiled jls executable')
   }
-  return executable
+  return canonicalPath(process.execPath)
 }
 
 function scheduleInstallerUninstall(executable: string, dataRoot: string): void {
