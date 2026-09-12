@@ -143,6 +143,7 @@ describe('0.4 interactive flow contract', () => {
 
   test('install disables a skill only when every targetable harness already has it', () => {
     expect(source).toContain('detected.every((agent) => targetInstalled(scope, skill, agent.id))')
+    expect(source).toContain("disabledSuffix: installedEverywhere ? ' (already installed)' : undefined")
     expect(source).toContain('selectedSkills.every((skill) => targetInstalled(scope, skill, agent.id))')
     expect(source).toContain("'The following supported AI harnesses were detected. You can opt out of any of these if you like.'")
   })
@@ -158,10 +159,10 @@ describe('0.4 interactive flow contract', () => {
     expect(coreSource).not.toContain('Which would you like to update instead?')
   })
 
-  test('updates have a confirmation and no-update state returns to management', () => {
+  test('updates have a confirmation and neutral no-update state', () => {
     expect(source).toContain("'The following updates are available. Please select which you would like to install.'")
     expect(source).toContain('prompts.note(updateSummary(scope, groups, availableVersions))')
-    expect(source).toContain("prompts.log.warn('No updates were found.')")
+    expect(source).toContain("prompts.log.info('No updates were found.')")
   })
 
   test('generated-data choice is integrated into skill uninstall', () => {
