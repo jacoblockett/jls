@@ -6,6 +6,7 @@ import { BACK_SIGNAL } from './nav-prompts'
 export type ExclusiveOption<Value> = {
   value: Value
   label: string
+  description?: string
   disabled?: boolean
   disabledSuffix?: string
   exclusive?: boolean
@@ -148,13 +149,14 @@ function optionText<Value>(
   state: 'inactive' | 'active' | 'selected' | 'active-selected' | 'submitted' | 'cancelled' | 'disabled',
 ): string {
   const label = option.label
+  const description = option.description ? ` ${styleText('dim', `(${option.description})`)}` : ''
   if (state === 'disabled') {
     const suffix = option.disabledSuffix ? styleText('gray', option.disabledSuffix) : ''
     return `${styleText('gray', S_CHECKBOX_INACTIVE)} ${styleText(['strikethrough', 'gray'], label)}${suffix}`
   }
-  if (state === 'active') return `${styleText('cyan', S_CHECKBOX_ACTIVE)} ${label}`
+  if (state === 'active') return `${styleText('cyan', S_CHECKBOX_ACTIVE)} ${label}${description}`
   if (state === 'selected') return `${styleText('green', S_CHECKBOX_SELECTED)} ${styleText('dim', label)}`
-  if (state === 'active-selected') return `${styleText('green', S_CHECKBOX_SELECTED)} ${label}`
+  if (state === 'active-selected') return `${styleText('green', S_CHECKBOX_SELECTED)} ${label}${description}`
   if (state === 'cancelled') return styleText(['strikethrough', 'dim'], label)
   if (state === 'submitted') return styleText('dim', label)
   return `${styleText('dim', S_CHECKBOX_INACTIVE)} ${styleText('dim', label)}`
