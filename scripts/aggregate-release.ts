@@ -1,4 +1,3 @@
-
 import { createHash } from 'node:crypto'
 import {
   copyFileSync,
@@ -49,10 +48,26 @@ function exactKeys(value: Record<string, unknown>, expected: string[], label: st
   }
 }
 
+export function catalogSkillReferences(skills: Record<string, unknown>): Record<string, SkillReference> {
+  const references: Record<string, SkillReference> = {}
+  for (const [name, value] of Object.entries(skills)) {
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error(`invalid catalog skill name ${name}`)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`invalid catalog skill ${name}`)
+    const manifestUrl = (value as Record<string, unknown>).manifest_url
+    if (typeof manifestUrl !== 'string' || !manifestUrl.trim()) throw new Error(`${name} catalog entry requires manifest_url`)
+    const parsed = new URL(manifestUrl)
+    if (parsed.protocol !== 'https:') throw new Error(`${name} manifest_url must use HTTPS`)
+    references[name] = { manifest_url: manifestUrl }
+  }
+  return references
+}
+
 function readCatalog(): Catalog {
-  const raw = JSON.parse(readFileSync(join(repo, 'catalog.json'), 'utf8')) as Catalog
-  if (raw.format !== 1 || !raw.skills || typeof raw.skills !== 'object') throw new Error('invalid catalog.json')
-  return raw
+  const raw = JSON.parse(readFileSync(join(repo, 'catalog.json'), 'utf8')) as Record<string, unknown>
+  if (raw.format !== 1 || !raw.skills || typeof raw.skills !== 'object' || Array.isArray(raw.skills)) {
+    throw new Error('invalid catalog.json')
+  }
+  return { format: 1, skills: catalogSkillReferences(raw.skills as Record<string, unknown>) }
 }
 
 function assertArtifact(
