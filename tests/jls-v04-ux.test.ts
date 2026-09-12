@@ -33,7 +33,7 @@ describe('0.4 installer scope UX', () => {
   })
 })
 
-describe('0.4 installer wording contract', () => {
+describe('0.4 installer wording and rendering contract', () => {
   const source = readFileSync(join(repo, 'src', 'jls-v04.ts'), 'utf8')
 
   test('generated-data question matches the approved wording', () => {
@@ -54,12 +54,33 @@ describe('0.4 installer wording contract', () => {
     expect(source).toContain("if (choice === BACK_SIGNAL || choice === 'no') return BACK_SIGNAL")
   })
 
-  test('summaries use ASCII asterisk bullets', () => {
-    expect(source).toContain('`* ${displaySkillName(skill)}`')
-    expect(source).toContain("lines.push('  * Skill/agent files: Remove')")
+  test('uses Clack path selection for custom scopes', () => {
+    expect(source).toContain('await prompts.path({')
+    expect(source).toContain('directory: true')
+    expect(source).toContain('validate: validateCustomPath')
   })
 
-  test('no-update result is a warning node', () => {
-    expect(source).toContain("prompts.log.warn('No updates were found.')")
+  test('installed skills carry an explicit already-installed suffix', () => {
+    expect(source).toContain("disabledSuffix: installedEverywhere ? ' (already installed)' : undefined")
+  })
+
+  test('summaries use bullet glyphs and flatten plain uninstalls', () => {
+    expect(source).toContain('`• ${displaySkillName(skill)}`')
+    expect(source).toContain("lines.push('  • Skill/agent files: Remove')")
+    expect(source).toContain('const showGeneratedDetail = removeData.size > 0')
+    expect(source).toContain('if (!showGeneratedDetail || !cleanupSkills.has(group.skill)) continue')
+  })
+
+  test('skill and installer no-update messages match and use info', () => {
+    expect(source.match(/prompts\.log\.info\('No updates were found\.'\)/g)?.length).toBe(2)
+  })
+
+  test('interactive lifecycle work is quiet, spinner-backed, and ends with structured status', () => {
+    expect(source).toContain("stdio: ['ignore', 'pipe', 'pipe']")
+    expect(source).toContain('spinner.start(`${words.progress} ${name}`)')
+    expect(source).toContain('prompts.log.success(`${words.success} ${name}`)')
+    expect(source).toContain("if (level === 'success') prompts.log.success('Done.')")
+    expect(source).toContain("else prompts.log.info('Done.')")
+    expect(source).toContain('prompts.outro()')
   })
 })
