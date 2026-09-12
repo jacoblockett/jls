@@ -6,7 +6,7 @@ import { basename, dirname, join, normalize, resolve } from 'node:path'
 import { styleText } from 'node:util'
 import { exclusiveMultiselect, type ExclusiveOption } from './exclusive-multiselect'
 import { HARNESS_ADAPTERS, harnessAdapter, type HarnessAdapter } from './harnesses'
-import { BACK_SIGNAL, navSelect, navText, type NavOption } from './nav-prompts'
+import { BACK_SIGNAL, navSelect, type NavOption } from './nav-prompts'
 import {
   checkInstallerUpdate,
   compareVersions,
@@ -85,6 +85,8 @@ type CatalogSkill = {
   manifest_url: string
   description?: string
 }
+
+type LifecycleAction = 'install' | 'update' | 'uninstall'
 
 const agentCatalog: HarnessAdapter[] = HARNESS_ADAPTERS
 const skillCatalog = catalog.skills as Record<string, CatalogSkill>
@@ -281,16 +283,14 @@ export function validateCustomPath(value: string | undefined): string | undefine
 
 async function customScope(state: WizardState, stepId: string): Promise<NavResult<Scope>> {
   const step = memory(state, stepId)
-  const raw = checked(await navText({
-    message: 'Enter a custom path.',
-    placeholder: process.cwd(),
-    initialValue: step.text,
-    allowBack: true,
+  const raw = checked(await prompts.path({
+    message: 'Select a custom path.',
+    root: process.cwd(),
+    directory: true,
+    initialValue: step.text ?? process.cwd(),
     validate: validateCustomPath,
-    onInput: (value) => { step.text = value },
   }))
-  if (raw === BACK_SIGNAL) return BACK_SIGNAL
-  const root = canonicalPath((raw as string).trim())
+  const root = canonicalPath(raw as string)
   step.text = root
   return { kind: 'project', origin: 'custom', identity: root, root }
 }
@@ -425,14 +425,14 @@ function instructionQuestion(agents: string[], scope: Scope): string {
 function installSummary(scope: Scope, skills: string[]): string {
   return [
     `JLS Installer will install the following skills ${scopePhrase(scope)}:`,
-    ...skills.map((skill) => `* ${displaySkillName(skill)}`),
+    ...skills.map((skill) => `• ${displaySkillName(skill)}`),
   ].join('\n')
 }
 
 function updateSummary(scope: Scope, groups: InstallGroup[], available: Record<string, string>): string {
   return [
     `JLS Installer will update the following skills ${scopePhrase(scope)}:`,
-    ...groups.map((group) => `* ${displaySkillName(group.skill)} (${updateStatus(group, available)})`),
+    ...groups.map((group) => `• ${displaySkillName(group.skill)} (${updateStatus(group, available)})`),
   ].join('\n')
 }
 
@@ -443,13 +443,13 @@ function uninstallSummary(
   cleanupGroups: CleanupGroup[],
 ): string {
   const cleanupSkills = new Set(cleanupGroups.map((group) => group.skill))
+  const showGeneratedDetail = removeData.size > 0
   const lines = [`JLS Installer will uninstall the following skills ${scopePhrase(scope)}:`]
   for (const group of groups) {
-    lines.push(`* ${displaySkillName(group.skill)}`)
-    lines.push('  * Skill/agent files: Remove')
-    if (cleanupSkills.has(group.skill)) {
-      lines.push(`  * Generated data: ${removeData.has(group.skill) ? 'Remove' : 'Keep'}`)
-    }
+    lines.push(`• ${displaySkillName(group.skill)}`)
+    if (!showGeneratedDetail || !cleanupSkills.has(group.skill)) continue
+    lines.push('  • Skill/agent files: Remove')
+    lines.push(`  • Generated data: ${removeData.has(group.skill) ? 'Remove' : 'Keep'}`)
   }
   return lines.join('\n')
 }
@@ -522,11 +522,49 @@ function lifecycleArgs(scope: Scope, agents: string[]): string[] {
 function runLifecycle(args: string[]): void {
   if (!Bun.isStandaloneExecutable) throw new Error('interactive lifecycle execution requires the compiled JLS installer')
   const result = spawnSync(process.execPath, ['--core', ...args], {
-    stdio: ['ignore', 'inherit', 'inherit'],
+    stdio: ['ignore', 'pipe', 'pipe'],
+    encoding: 'utf8',
     windowsHide: true,
   })
   if (result.error) throw result.error
-  if (result.status !== 0) throw new Error(`installer operation failed with exit code ${result.status ?? 1}`)
+  if (result.status !== 0) {
+    const detail = String(result.stderr || result.stdout || '').trim()
+    throw new Error(detail || `installer operation failed with exit code ${result.status ?? 1}`)
+  }
+}
+
+function runLifecycleItem(
+  action: LifecycleAction,
+  skill: string,
+  args: string[],
+  before?: () => void,
+): boolean {
+  const name = displaySkillName(skill)
+  const words = action === 'install'
+    ? { progress: 'Installing', success: 'Installed', verb: 'install' }
+    : action === 'update'
+      ? { progress: 'Updating', success: 'Updated', verb: 'update' }
+      : { progress: 'Uninstalling', success: 'Uninstalled', verb: 'uninstall' }
+  const spinner = prompts.spinner({ withGuide: false })
+  spinner.start(`${words.progress} ${name}`)
+  try {
+    before?.()
+    runLifecycle(args)
+    spinner.clear()
+    prompts.log.success(`${words.success} ${name}`)
+    return true
+  } catch (error) {
+    spinner.clear()
+    const detail = error instanceof Error ? error.message.trim() : String(error).trim()
+    prompts.log.error(`Failed to ${words.verb} ${name}${detail ? `: ${detail}` : '.'}`)
+    return false
+  }
+}
+
+function finishOperation(level: 'success' | 'info'): void {
+  if (level === 'success') prompts.log.success('Done.')
+  else prompts.log.info('Done.')
+  prompts.outro()
 }
 
 async function installAtScope(scope: Scope, state: WizardState, prefix: string): Promise<NavResult<number>> {
@@ -539,12 +577,16 @@ async function installAtScope(scope: Scope, state: WizardState, prefix: string):
 
   skillStep:
   while (true) {
-    const skillItems: ChoiceItem[] = Object.keys(release.skills).sort().map((skill) => ({
-      value: skill,
-      label: displaySkillName(skill),
-      description: skillDescription(skill),
-      disabled: detected.every((agent) => targetInstalled(scope, skill, agent.id)),
-    }))
+    const skillItems: ChoiceItem[] = Object.keys(release.skills).sort().map((skill) => {
+      const installedEverywhere = detected.every((agent) => targetInstalled(scope, skill, agent.id))
+      return {
+        value: skill,
+        label: displaySkillName(skill),
+        description: skillDescription(skill),
+        disabled: installedEverywhere,
+        disabledSuffix: installedEverywhere ? ' (already installed)' : undefined,
+      }
+    })
     const selectableSkills = skillItems.filter((item) => !item.disabled)
     if (selectableSkills.length === 0) {
       prompts.log.info('All available skills are already installed for every detected AI harness.')
@@ -620,12 +662,17 @@ async function installAtScope(scope: Scope, state: WizardState, prefix: string):
           }
 
           for (const skill of selectedSkills) {
-            runLifecycle([
+            const success = runLifecycleItem('install', skill, [
               skill,
               ...lifecycleArgs(scope, selectedAgents),
               injectedSkills.includes(skill) ? '--instructions' : '--no-instructions',
             ])
+            if (!success) {
+              prompts.outro()
+              return 1
+            }
           }
+          finishOperation('success')
           return 0
         }
       } finally {
@@ -641,7 +688,7 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
   const installed = discoverInstallations(scope)
   const available = installed.filter((group) => updateAvailable(group, availableVersions))
   if (available.length === 0) {
-    prompts.log.warn('No updates were found.')
+    prompts.log.info('No updates were found.')
     return BACK_SIGNAL
   }
 
@@ -666,12 +713,17 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
     if (proceed === BACK_SIGNAL) continue selectionStep
 
     for (const group of groups) {
-      runLifecycle([
+      const success = runLifecycleItem('update', group.skill, [
         'update',
         group.skill,
         ...lifecycleArgs(scope, group.targets.map((target) => target.agent)),
       ])
+      if (!success) {
+        prompts.outro()
+        return 1
+      }
     }
+    finishOperation('info')
     return 0
   }
 }
@@ -718,11 +770,25 @@ async function uninstallAtScope(scope: Scope, state: WizardState, prefix: string
         continue skillStep
       }
 
-      for (const cleanupGroup of cleanupGroups) {
-        if (!removeData.has(cleanupGroup.skill)) continue
-        for (const cleanup of cleanupGroup.cleanups) removeGeneratedCleanup(scope.root, cleanup)
+      for (const group of groups) {
+        const cleanupGroup = cleanupGroups.find((candidate) => candidate.skill === group.skill)
+        const before = cleanupGroup && removeData.has(group.skill)
+          ? () => {
+              for (const cleanup of cleanupGroup.cleanups) removeGeneratedCleanup(scope.root, cleanup)
+            }
+          : undefined
+        const success = runLifecycleItem(
+          'uninstall',
+          group.skill,
+          ['uninstall', group.skill, '--scope', scopeArg(scope)],
+          before,
+        )
+        if (!success) {
+          prompts.outro()
+          return 1
+        }
       }
-      runLifecycle(['uninstall', ...selected, '--scope', scopeArg(scope)])
+      finishOperation('success')
       return 0
     }
   }
@@ -813,7 +879,7 @@ async function updateInstallerWizard(state: WizardState): Promise<NavResult<numb
     spinner.clear()
   }
   if (!update) {
-    prompts.log.info('Up to date.')
+    prompts.log.info('No updates were found.')
     return BACK_SIGNAL
   }
   prompts.note(`An update was found. Would you like to update from v${VERSION} to v${update.version}? If you choose to update, this current session will end. You must relaunch the installer after updating.`)
@@ -821,6 +887,7 @@ async function updateInstallerWizard(state: WizardState): Promise<NavResult<numb
   if (proceed === BACK_SIGNAL) return BACK_SIGNAL
   const staged = await stageInstallerUpdate(executable, update)
   scheduleInstallerReplacement(staged, executable)
+  prompts.outro()
   return 0
 }
 
@@ -831,6 +898,7 @@ async function uninstallInstallerWizard(state: WizardState): Promise<NavResult<n
   const proceed = await chooseConfirmation(state, 'installer-uninstall.confirm', true)
   if (proceed === BACK_SIGNAL) return BACK_SIGNAL
   scheduleInstallerUninstall(executable, installerDataRoot())
+  prompts.outro()
   return 0
 }
 
@@ -909,10 +977,17 @@ export async function main(): Promise<number> {
 }
 
 if (import.meta.main) {
+  const interactive = process.argv.slice(2).length === 0 && process.stdout.isTTY
   main()
     .then((exitCode) => { process.exitCode = exitCode })
     .catch((error) => {
-      console.error(`jls: ${error instanceof Error ? error.message : String(error)}`)
+      const message = `jls: ${error instanceof Error ? error.message : String(error)}`
+      if (interactive) {
+        prompts.log.error(message)
+        prompts.outro()
+      } else {
+        console.error(message)
+      }
       process.exitCode = 1
     })
 }
