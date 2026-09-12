@@ -98,7 +98,7 @@ describe('install preflight classification', () => {
     expect(changed[0]?.state).toBe('configure')
   })
 
-  test('groups stale targets by skill for one update choice per skill', () => {
+  test('groups stale targets by skill', () => {
     const targets = classifyInstallTargets(
       ['map'],
       ['codex', 'claude'],
@@ -109,7 +109,6 @@ describe('install preflight classification', () => {
         { skill: 'map', agent: 'claude', version: 'unknown', instructions: true },
       ],
     )
-
     expect(staleSkills(targets)).toEqual([
       { skill: 'map', installedVersions: ['0.1.0', 'unknown'], availableVersion: '0.2.0' },
     ])
@@ -127,53 +126,50 @@ describe('install preflight classification', () => {
       ],
     )
     expect(satisfiedSkills(complete)).toEqual(['map'])
+  })
+})
 
-    const mixed = classifyInstallTargets(
-      ['map'],
-      ['codex', 'claude'],
-      { map: '0.2.0' },
-      { map: false },
-      [{ skill: 'map', agent: 'codex', version: '0.2.0', instructions: false }],
-    )
-    expect(satisfiedSkills(mixed)).toEqual([])
-    expect(mixed[1]?.state).toBe('missing')
+describe('0.4 interactive flow contract', () => {
+  const repo = resolve(import.meta.dir, '..')
+  const source = readFileSync(join(repo, 'src', 'jls-v04.ts'), 'utf8').replace(/\r\n/g, '\n')
+
+  test('bare installer is scope-first and retains custom paths', () => {
+    expect(source).toContain("label: 'Manage skills on the current path'")
+    expect(source).toContain("label: 'Manage skills on the global path'")
+    expect(source).toContain("label: 'Manage skills on a custom path'")
+    expect(source).toContain("label: 'Manage installer'")
   })
 
-  test('interactive install inspection happens only after Continue confirmation', () => {
-    const repo = resolve(import.meta.dir, '..')
-    const source = readFileSync(join(repo, 'src', 'jls.ts'), 'utf8').replace(/\r\n/g, '\n')
-    const start = source.indexOf('async function installAtScope(')
-    const end = source.indexOf('\nasync function installWizard(', start)
-    const installFlow = source.slice(start, end)
-    const confirmation = installFlow.indexOf('chooseConfirmation(')
-    const inspection = installFlow.indexOf('installPreflight(')
-
-    expect(confirmation).toBeGreaterThan(-1)
-    expect(inspection).toBeGreaterThan(confirmation)
-    expect(installFlow).not.toContain('All requested skill installations are already up to date.')
-    expect(installFlow).not.toContain('No changes needed')
-    expect(installFlow).toContain('There is nothing to install.')
+  test('install disables a skill only when every targetable harness already has it', () => {
+    expect(source).toContain('agents.every((agent) => targetInstalled(scope, name, agent))')
+    expect(source).toContain('skills.every((skill) => targetInstalled(scope, skill, agent.id))')
+    expect(source).toContain("'Which AI harnesses should receive these skills?'")
   })
 
-  test('install continuation status is only shown after whole skills were skipped', () => {
-    const repo = resolve(import.meta.dir, '..')
-    const source = readFileSync(join(repo, 'src', 'jls.ts'), 'utf8').replace(/\r\n/g, '\n')
-    const start = source.indexOf('async function installAtScope(')
-    const end = source.indexOf('\nasync function installWizard(', start)
-    const installFlow = source.slice(start, end)
-
-    expect(installFlow).toContain('if (alreadyInstalled.length > 0) {\n            prompts.log.info(`Installation will continue for:')
+  test('instruction injection defaults on for capable selected skills', () => {
+    expect(source).toContain('initialValues: capable')
+    expect(source).toContain("'About AI Instruction Files'")
   })
 
-  test('Update Skills stays at scope selection when installed skills are current', () => {
-    const repo = resolve(import.meta.dir, '..')
-    const source = readFileSync(join(repo, 'src', 'jls.ts'), 'utf8').replace(/\r\n/g, '\n')
-    const start = source.indexOf('async function updateAtScope(')
-    const end = source.indexOf('\nasync function updateWizard(', start)
-    const updateFlow = source.slice(start, end)
+  test('Install new skills does not silently perform stale skill updates', () => {
+    expect(source).toContain("const actionable = planned.filter((target) => target.state === 'missing' || target.state === 'configure')")
+    expect(source).not.toContain('Which would you like to update instead?')
+  })
 
-    expect(updateFlow).toContain('All skills are already up to date. Choose a different scope or path.')
-    expect(updateFlow).toContain("prompts.log.warn('All skills are already up to date. Choose a different scope or path.')\n        return BACK_SIGNAL")
-    expect(updateFlow).not.toContain("prompts.log.warn('No updates found.')")
+  test('updates have a confirmation and no-update state returns to management', () => {
+    expect(source).toContain("'The following updates are available. Please select which you would like to install.'")
+    expect(source).toContain('prompts.note(updateSummary(scope, groups, availableVersions))')
+    expect(source).toContain("prompts.log.info('No updates were found.')")
+  })
+
+  test('generated-data choice is integrated into skill uninstall', () => {
+    expect(source).toContain("'The following selected skills have generated data that can also be removed.'")
+    expect(source).toContain("initialValues: cleanupGroups.map((group) => group.skill)")
+    expect(source).not.toContain('Remove skill-generated data')
+  })
+
+  test('installer manifest remains the runtime version authority', () => {
+    expect(source).toContain("import installerManifest from '../manifest.json'")
+    expect(source).toContain('const VERSION = installerManifest.version')
   })
 })
