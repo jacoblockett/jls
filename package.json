@@ -6,7 +6,7 @@
   "packageManager": "bun@1.4.0",
   "scripts": {
     "build": "bun scripts/build.ts",
-    "test:installer": "bun test --timeout 30000 tests/exclusive-multiselect.test.ts tests/generated-cleanup.test.ts tests/harnesses.test.ts tests/install-preflight.test.ts tests/installer-updater.test.ts tests/resource-render.test.ts tests/targets.test.ts",
+    "test:installer": "bun test --timeout 30000 tests/exclusive-multiselect.test.ts tests/generated-cleanup.test.ts tests/harnesses.test.ts tests/install-preflight.test.ts tests/installer-updater.test.ts tests/jls-v04-ux.test.ts tests/resource-render.test.ts tests/targets.test.ts",
     "smoke": "bun run build && bun run test:installer"
   },
   "dependencies": {
