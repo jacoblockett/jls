@@ -132,6 +132,7 @@ describe('install preflight classification', () => {
 describe('0.4 interactive flow contract', () => {
   const repo = resolve(import.meta.dir, '..')
   const source = readFileSync(join(repo, 'src', 'jls-v04.ts'), 'utf8').replace(/\r\n/g, '\n')
+  const coreSource = readFileSync(join(repo, 'src', 'jls-v04-core.ts'), 'utf8').replace(/\r\n/g, '\n')
 
   test('bare installer is scope-first and retains custom paths', () => {
     expect(source).toContain("label: 'Manage skills on the current path'")
@@ -141,9 +142,9 @@ describe('0.4 interactive flow contract', () => {
   })
 
   test('install disables a skill only when every targetable harness already has it', () => {
-    expect(source).toContain('agents.every((agent) => targetInstalled(scope, name, agent))')
-    expect(source).toContain('skills.every((skill) => targetInstalled(scope, skill, agent.id))')
-    expect(source).toContain("'Which AI harnesses should receive these skills?'")
+    expect(source).toContain('detected.every((agent) => targetInstalled(scope, skill, agent.id))')
+    expect(source).toContain('selectedSkills.every((skill) => targetInstalled(scope, skill, agent.id))')
+    expect(source).toContain("'The following supported AI harnesses were detected. You can opt out of any of these if you like.'")
   })
 
   test('instruction injection defaults on for capable selected skills', () => {
@@ -152,19 +153,20 @@ describe('0.4 interactive flow contract', () => {
   })
 
   test('Install new skills does not silently perform stale skill updates', () => {
-    expect(source).toContain("const actionable = planned.filter((target) => target.state === 'missing' || target.state === 'configure')")
+    expect(coreSource).toContain("const actionable = planned.filter((target) => target.state === 'missing' || target.state === 'configure')")
     expect(source).not.toContain('Which would you like to update instead?')
+    expect(coreSource).not.toContain('Which would you like to update instead?')
   })
 
   test('updates have a confirmation and no-update state returns to management', () => {
     expect(source).toContain("'The following updates are available. Please select which you would like to install.'")
     expect(source).toContain('prompts.note(updateSummary(scope, groups, availableVersions))')
-    expect(source).toContain("prompts.log.info('No updates were found.')")
+    expect(source).toContain("prompts.log.warn('No updates were found.')")
   })
 
   test('generated-data choice is integrated into skill uninstall', () => {
-    expect(source).toContain("'The following selected skills have generated data that can also be removed.'")
-    expect(source).toContain("initialValues: cleanupGroups.map((group) => group.skill)")
+    expect(source).toContain("'The following skills you selected have data generated beyond its installation. If you would like to retain any of this data, deselect the options below before continuing.'")
+    expect(source).toContain('initialValues: cleanupGroups.map((group) => group.skill)')
     expect(source).not.toContain('Remove skill-generated data')
   })
 
