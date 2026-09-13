@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -62,7 +63,7 @@ export type InstallerUpdate = {
 
 export type GeneratedDataSpec = {
   path: string
-  marker?: string
+  marker: string
 }
 
 export type HarnessResources = Record<string, Record<string, string[]>>
@@ -364,13 +365,13 @@ export function parseSkillPackageManifest(value: unknown): SkillPackageManifest 
     : (() => {
       if (!Array.isArray(raw.generated_data)) throw new Error(`${raw.name} generated_data must be an array`)
       return raw.generated_data.map((value, index) => {
-        if (!value || typeof value !== 'object') throw new Error(`${raw.name} generated_data[${index}] is invalid`)
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+          throw new Error(`${raw.name} generated_data[${index}] is invalid`)
+        }
         const entry = value as Record<string, unknown>
         return {
           path: packagePath(entry.path, `${raw.name} generated_data[${index}].path`),
-          marker: entry.marker === undefined
-            ? undefined
-            : packagePath(entry.marker, `${raw.name} generated_data[${index}].marker`),
+          marker: packagePath(entry.marker, `${raw.name} generated_data[${index}].marker`),
         }
       })
     })()
@@ -403,8 +404,15 @@ function assertPackageFiles(root: string, manifest: SkillPackageManifest): void 
     ...Object.values(manifest.runtime_artifacts ?? {}),
     ...(manifest.instruction_fragment ? [manifest.instruction_fragment] : []),
   ])
+  // Install manifests define the exact leaf files JLS may manage. Allowing a
+  // declaration to name a directory would make later file-granular cleanup
+  // ambiguous and could turn a shared container into an ownership boundary.
   for (const rel of declared) {
-    if (!existsSync(join(root, rel))) throw new Error(`${manifest.name} package is missing ${rel}`)
+    const path = join(root, rel)
+    if (!existsSync(path)) throw new Error(`${manifest.name} package is missing ${rel}`)
+    if (!statSync(path).isFile()) {
+      throw new Error(`${manifest.name} package declaration must reference a file: ${rel}`)
+    }
   }
 }
 
