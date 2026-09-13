@@ -20,7 +20,7 @@ import {
   type HarnessAdapter,
   type HarnessPaths,
 } from './harnesses'
-import { classifyInstallTargets, type InstallTargetState } from './install-preflight'
+import { classifyInstallTargets, staleUpdateTargets, type InstallTargetState } from './install-preflight'
 import {
   compareVersions,
   downloadSkillPackage,
@@ -196,7 +196,6 @@ function atomicWrite(path: string, data: string | Uint8Array, mode = 0o644): voi
   try {
     writeFileSync(tmp, data)
     try { chmodSync(tmp, mode) } catch {}
-    if (isWindows && existsSync(path)) rmSync(path, { force: true })
     renameSync(tmp, path)
   } catch (error) {
     try { rmSync(tmp, { force: true }) } catch {}
@@ -660,21 +659,21 @@ async function updateCommand(args: string[]): Promise<number> {
   const parsed = parseAction(args, 'update')
   const scope = requireScope(parsed)
   const release = requireRelease(await fetchStableReleaseManifest())
-  let groups = matchingGroups(parsed, scope)
-  groups = groups.filter((group) => {
-    const released = release.skills[group.skill]
-    if (!released) return false
-    return installedVersions(group).some((version) => compareVersions(version, released.version) < 0)
-  })
+  const groups = matchingGroups(parsed, scope)
 
   for (const group of groups) {
+    const released = release.skills[group.skill]
+    if (!released) continue
+    const staleTargets = staleUpdateTargets(group.targets, released.version)
+    if (staleTargets.length === 0) continue
+
     ensureReleasedAndCompatible(release, [group.skill])
-    const pkg = await downloadSkillPackage(group.skill, release.skills[group.skill])
+    const pkg = await downloadSkillPackage(group.skill, released)
     try {
       installTargets(
         pkg,
         group.scope,
-        group.targets.map((target) => ({
+        staleTargets.map((target) => ({
           agent: target.agent,
           instructions: parsed.instructions ?? target.instructions,
         })),
