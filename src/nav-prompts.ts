@@ -77,6 +77,10 @@ function blankGuide(hasGuide: boolean): string {
   return hasGuide ? styleText('cyan', S_BAR) : ''
 }
 
+function backHistory(hasGuide: boolean): string {
+  return `${hasGuide ? `${styleText('gray', S_BAR)}  ` : ''}${styleText('dim', 'Go back')}`
+}
+
 class BackSelectPrompt<Value> extends SelectPrompt<NavOption<Value>> {
   backRequested = false
 
@@ -135,7 +139,7 @@ export async function navSelect<Value>(opts: NavSelectOptions<Value>): Promise<V
       )
       const title = `${hasGuide ? `${styleText('gray', S_BAR)}\n` : ''}${wrappedMessage}\n`
       if (this.state === 'submit') {
-        if (prompt.backRequested) return `${title}${hasGuide ? styleText('gray', S_BAR) : ''}`
+        if (prompt.backRequested) return `${title}${backHistory(hasGuide)}`
         return `${title}${hasGuide ? `${styleText('gray', S_BAR)}  ` : ''}${selectOptionText(this.options[this.cursor], 'selected')}`
       }
       if (this.state === 'cancel') {
@@ -202,7 +206,7 @@ export async function navText(opts: NavTextOptions): Promise<string | symbol> {
         return `${title.trim()}\n${hasGuide ? `${styleText('yellow', S_BAR)}  ` : ''}${userInput}\n${hasGuide ? styleText('yellow', S_BAR_END) : ''}${errorText}\n`
       }
       if (this.state === 'submit') {
-        if (prompt.backRequested) return `${title}${hasGuide ? styleText('gray', S_BAR) : ''}`
+        if (prompt.backRequested) return `${title}${backHistory(hasGuide)}`
         return `${title}${hasGuide ? styleText('gray', S_BAR) : ''}${value ? `  ${styleText('dim', value)}` : ''}`
       }
       if (this.state === 'cancel') {
