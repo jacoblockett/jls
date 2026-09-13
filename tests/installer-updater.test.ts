@@ -160,10 +160,19 @@ describe('skill package contract', () => {
       runtime_artifacts: { 'windows-x64': 'runtime/windows-x64/example.exe' },
       runtime_files: ['support.dat'],
       runtime_cli: 'example',
-      generated_data: [{ path: '.example', marker: 'project.json' }],
+      generated_data: [{
+        path: '.example',
+        marker: 'project.json',
+        ownership_marker: '.jls-owned.json',
+      }],
     })
     expect(parsed.name).toBe('example-skill')
     expect(parsed.runtime_artifacts?.['windows-x64']).toBe('runtime/windows-x64/example.exe')
+    expect(parsed.generated_data?.[0]).toEqual({
+      path: '.example',
+      marker: 'project.json',
+      ownership_marker: '.jls-owned.json',
+    })
     expect(() => parseSkillPackageManifest({
       format: 1,
       name: 'example-skill',
