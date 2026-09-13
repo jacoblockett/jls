@@ -345,6 +345,27 @@ function installedPackageManifest(path: string): SkillPackageManifest | undefine
   }
 }
 
+function skillFilesPresent(skillPath: string, manifest: SkillPackageManifest): boolean {
+  return manifest.skill_files.every((rel) => {
+    const path = join(skillPath, rel)
+    return existsSync(path) && statSync(path).isFile()
+  })
+}
+
+function harnessResourcesPresent(manifest: SkillPackageManifest, agent: string, scope: Scope): boolean {
+  const declared = manifest.harness_resources?.[agent] ?? {}
+  const roots = agentPaths(agent, scope).resources
+  for (const [kind, files] of Object.entries(declared)) {
+    const root = roots[kind]
+    if (!root) return false
+    for (const source of files) {
+      const destination = join(root, basename(source))
+      if (!existsSync(destination) || !statSync(destination).isFile()) return false
+    }
+  }
+  return true
+}
+
 function discoverInstallations(scope: Scope): InstallGroup[] {
   const groups = new Map<string, InstallGroup>()
   for (const agent of agentCatalog) {
@@ -352,7 +373,7 @@ function discoverInstallations(scope: Scope): InstallGroup[] {
     if (!existsSync(paths.skillRoot) || !statSync(paths.skillRoot).isDirectory()) continue
     for (const entry of readdirSync(paths.skillRoot).sort()) {
       const skillPath = join(paths.skillRoot, entry)
-      if (!statSync(skillPath).isDirectory()) continue
+      if (!existsSync(skillPath) || !statSync(skillPath).isDirectory()) continue
       const manifest = installedPackageManifest(skillPath)
       if (!manifest || manifest.name !== entry) continue
       const key = `${manifest.name}\u0000${scope.identity}`
@@ -374,15 +395,17 @@ function discoverInstallations(scope: Scope): InstallGroup[] {
 }
 
 function managedBlockPresent(path: string, skill: string): boolean {
-  if (!existsSync(path)) return false
+  if (!existsSync(path) || !statSync(path).isFile()) return false
   const current = readFileSync(path, 'utf8')
   return current.includes(`<!-- jls:begin ${skill} -->`) && current.includes(`<!-- jls:end ${skill} -->`)
 }
 
 function targetInstalled(scope: Scope, skill: string, agent: string): boolean {
-  return discoverInstallations(scope)
-    .find((group) => group.skill === skill)
-    ?.targets.some((target) => target.agent === agent) ?? false
+  const paths = agentPaths(agent, scope)
+  const skillPath = join(paths.skillRoot, skill)
+  const manifest = installedPackageManifest(skillPath)
+  if (!manifest || manifest.name !== skill) return false
+  return skillFilesPresent(skillPath, manifest) && harnessResourcesPresent(manifest, agent, scope)
 }
 
 function displaySkillName(name: string): string {
@@ -490,7 +513,7 @@ function uninstallSummary(
 
 function collisionSummary(collisions: InstallCollision[]): string {
   return [
-    'The following directories/files would be occupied/overwritten should installation continue. Installation in this case would be destructive and could cause permanent loss of data.',
+    'The following existing paths conflict with files JLS needs to install. Continuing will remove or overwrite those exact paths and could cause permanent loss of data.',
     '',
     ...collisions.map((collision) => noteBullet(normalizedPath(collision.path))),
   ].join('\n')
@@ -741,16 +764,16 @@ async function installAtScope(
                 `${prefix}.instructions.single`,
                 singleInstructionQuestion(skill, selectedAgents, scope),
                 [
-                  { value: 'inject', label: 'Inject' },
-                  { value: 'skip', label: 'Do not inject' },
+                  { value: 'yes', label: 'Yes' },
+                  { value: 'no', label: 'No' },
                 ],
-                { allowBack: true, initialValue: 'inject' },
+                { allowBack: true, initialValue: 'yes' },
               )
               if (selected === BACK_SIGNAL) {
                 if (harnessWasPrompted) continue harnessStep
                 continue skillStep
               }
-              if (selected === 'inject') injectedSkills = [skill]
+              if (selected === 'yes') injectedSkills = [skill]
             } else {
               const selected = await chooseMany(
                 state,
@@ -790,7 +813,7 @@ async function installAtScope(
           const collisions = [...collisionMap.values()]
           if (collisions.length > 0) {
             prompts.note(collisionSummary(collisions), 'Collisions detected')
-            prompts.log.warn(wrapLogMessage('See above. Installation has failed due to colliding directories/files. Would you like to continue with installation despite this collision?'))
+            prompts.log.warn(wrapLogMessage('See above. Installation has failed due to colliding files/paths. Would you like to continue with installation despite this collision?'))
             const destructiveProceed = await chooseConfirmation(state, `${prefix}.collision-confirm`, true)
             if (destructiveProceed === BACK_SIGNAL) continue instructionStep
             removeInstallCollisions(collisions)
