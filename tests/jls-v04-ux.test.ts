@@ -45,19 +45,27 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).toContain('AI tools can use instruction files to receive extra directions about how they should work in a project.')
   })
 
-  test('harness picker uses the approved wording and defaults all feasible harnesses on', () => {
-    expect(source).toContain('The following supported AI harnesses were detected. You can opt out of any of these if you like.')
+  test('harness picker uses the approved wording verbatim and defaults all feasible harnesses on', () => {
+    expect(source).toContain("For which of the following AI harnesses would you like to install your selected skills? If you don't see your desired harness here, it is either undetected or unsupported.")
     expect(source).toContain('initialValues: enabledHarnesses')
-    expect(source).not.toContain("For which of the following AI harnesses would you like to install your selected skills? If you don't see your desired harness here, it is either undetected or unsupported.")
+    expect(source).not.toContain('The following supported AI harnesses were detected. You can opt out of any of these if you like.')
   })
 
-  test('single feasible choices and empty scopes skip redundant screens', () => {
+  test('single feasible required choices and empty scopes skip redundant screens', () => {
     expect(source).toContain('if (enabled.length === 1) {')
+    expect(source).toContain('if (required && selectable.length === 1) {')
     expect(source).toContain('const harnessWasPrompted = enabledHarnesses.length > 1')
     expect(source).toContain('selectedAgents = enabledHarnesses')
     expect(source).toContain("noSkillsDetected ? 'No skills detected. Which skills would you like to install?' : 'Which skills would you like to install?'")
     expect(source).toContain('if (!hasInstalled) {')
     expect(source).toContain('const result = await installAtScope(scope, state, `${prefix}.install`, true)')
+  })
+
+  test('navigation backs through visible steps rather than auto-selected hidden steps', () => {
+    expect(source).toContain('const skillWasPrompted = selectableSkills.length > 1')
+    expect(source).toContain('const selectionWasPrompted = available.length > 1')
+    expect(source).toContain('if (skillWasPrompted) continue skillStep')
+    expect(source).toContain('if (selectionWasPrompted) continue selectionStep')
   })
 
   test('zero detected harnesses stop installation explicitly', () => {
@@ -79,13 +87,14 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).toContain("disabledSuffix: installedEverywhere ? ' (already installed)' : undefined")
   })
 
-  test('install summary uses the approved scope wording, concrete path, and real bullets', () => {
-    expect(source).toContain('`JLS Installer will install the following skills on ${scopeDescription(scope)}:`')
-    expect(source).toContain("if (scope.origin === 'current') return 'your current path'")
-    expect(source).toContain("if (scope.origin === 'global') return 'your global path'")
-    expect(source).toContain("return 'your custom path'")
-    expect(source).toContain('scope.root')
+  test('summaries use the requested action wording, concrete italic path, and dim real bullets', () => {
+    expect(source).toContain("'The following skills will be installed:'")
+    expect(source).toContain("'The following skills will be updated:'")
+    expect(source).toContain("'The following skills will be uninstalled:'")
+    expect(source).toContain("return styleText('italic', scope.root)")
     expect(source).toContain("return styleText('dim', `${indent}• ${text}`)")
+    expect(source).not.toContain('JLS Installer will install')
+    expect(source).not.toContain('scopeDescription(scope)')
   })
 
   test('uninstall summary stays flat unless generated data is actually selected for removal', () => {
@@ -99,14 +108,14 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source.match(/prompts\.log\.info\('No updates were found\.'\)/g)?.length).toBe(2)
   })
 
-  test('interactive lifecycle work uses the requested status levels and a real Clack outro', () => {
+  test('interactive lifecycle work uses requested status levels and does not append an empty final branch', () => {
     expect(source).toContain("stdio: ['ignore', 'pipe', 'pipe']")
     expect(source).toContain('spinner.start(`${words.progress} ${name}`)')
     expect(source).toContain("if (action === 'update') prompts.log.info(`${words.success} ${name}`)")
     expect(source).toContain('else prompts.log.success(`${words.success} ${name}`)')
     expect(source).toContain("if (level === 'success') prompts.log.success('Done.')")
     expect(source).toContain("else prompts.log.info('Done.')")
-    expect(source).toContain("prompts.outro('')")
+    expect(source).not.toContain("prompts.outro('')")
   })
 
   test('installer update wording and replacement path match the accepted contract', () => {
