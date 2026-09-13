@@ -376,6 +376,23 @@ function runtimeOwnershipEvidence(scope: Scope, skill: string): { root: boolean;
   return { root, skill: ownedSkill }
 }
 
+function legacyGeneratedDataOwned(scope: Scope, skill: string, generatedPath: string): boolean {
+  const wanted = normalizedPath(resolve(generatedPath))
+  for (const group of discoverInstallations(scope)) {
+    if (group.skill !== skill) continue
+    for (const installed of group.targets) {
+      const manifest = installedPackageManifest(installed.skillPath)
+      if (!manifest || manifest.name !== skill) continue
+      for (const spec of manifest.generated_data ?? []) {
+        if (normalizedPath(resolve(scope.root, spec.path)) !== wanted || !spec.marker) continue
+        const marker = join(generatedPath, spec.marker)
+        if (existsSync(marker) && statSync(marker).isFile()) return true
+      }
+    }
+  }
+  return false
+}
+
 function assertInstallCollisions(pkg: DownloadedSkillPackage, scope: Scope, targets: InstallTarget[]): void {
   const skill = pkg.manifest.name
 
@@ -383,7 +400,12 @@ function assertInstallCollisions(pkg: DownloadedSkillPackage, scope: Scope, targ
     const legacy = runtimeOwnershipEvidence(scope, skill)
     assertRuntimeLayoutAvailable(scope.root, skill, legacy.root, legacy.skill)
   }
-  assertGeneratedDataOwnership(scope.root, skill, pkg.manifest.generated_data)
+  assertGeneratedDataOwnership(
+    scope.root,
+    skill,
+    pkg.manifest.generated_data,
+    (target) => legacyGeneratedDataOwned(scope, skill, target),
+  )
 
   for (const target of targets) {
     const paths = agentPaths(target.agent, scope)
@@ -518,19 +540,33 @@ function parseAction(args: string[], command: 'install' | 'update' | 'uninstall'
     if (arg === '--scope') {
       if (i + 1 >= body.length) throw new Error('--scope requires user, cwd, or a path')
       out.scope = body[++i]
-    } else if (arg.startsWith('--scope=')) out.scope = arg.slice('--scope='.length)
-    else if (arg === '--agent') {
+      continue
+    }
+    if (arg.startsWith('--scope=')) {
+      out.scope = arg.slice('--scope='.length)
+      continue
+    }
+    if (arg === '--agent') {
       if (i + 1 >= body.length) throw new Error('--agent requires a harness name')
       out.agents.push(body[++i])
-    } else if (arg.startsWith('--agent=')) out.agents.push(arg.slice('--agent='.length)
-    else if (arg === '--instructions') {
+      continue
+    }
+    if (arg.startsWith('--agent=')) {
+      out.agents.push(arg.slice('--agent='.length))
+      continue
+    }
+    if (arg === '--instructions') {
       if (command === 'uninstall') throw new Error('--instructions is not valid for uninstall')
       out.instructions = true
-    } else if (arg === '--no-instructions') {
+      continue
+    }
+    if (arg === '--no-instructions') {
       if (command === 'uninstall') throw new Error('--no-instructions is not valid for uninstall')
       out.instructions = false
-    } else if (arg.startsWith('-')) throw new Error(`unknown ${command} option ${arg}`)
-    else out.skills.push(arg)
+      continue
+    }
+    if (arg.startsWith('-')) throw new Error(`unknown ${command} option ${arg}`)
+    out.skills.push(arg)
   }
   return out
 }
