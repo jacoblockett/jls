@@ -475,7 +475,7 @@ function uninstallSummary(
 }
 
 function installedVersions(group: InstallGroup): string[] {
-  return [...new Set(group.targets.map((target) => target.version)).sort()]
+  return [...new Set(group.targets.map((target) => target.version))].sort()
 }
 
 function stableVersions(release: ReleaseManifest): Record<string, string> {
