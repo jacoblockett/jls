@@ -19,13 +19,12 @@ function reset(name: string): string {
 }
 
 describe('generated cleanup manifest contract', () => {
-  test('supports bounded paths, ownership markers, and explicit Beads metadata cleanup', () => {
+  test('supports marker-identified paths and explicit Beads metadata cleanup', () => {
     const specs = cleanupSpecs({
       name: 'example',
       generated_data: [{
         path: '.example',
         marker: 'project.json',
-        ownership_marker: '.jls-owned.json',
         description: 'Example data',
       }],
       generated_cleanup: [{
@@ -40,7 +39,6 @@ describe('generated cleanup manifest contract', () => {
         kind: 'path',
         path: '.example',
         marker: 'project.json',
-        ownershipMarker: '.jls-owned.json',
         description: 'Example data',
       },
       {
@@ -52,8 +50,9 @@ describe('generated cleanup manifest contract', () => {
     ])
   })
 
-  test('rejects traversal rather than allowing cleanup outside the selected scope', () => {
-    expect(() => cleanupSpecs({ name: 'bad', generated_data: [{ path: '../outside' }] })).toThrow('relative contained path')
+  test('path cleanup requires an identifying marker and rejects traversal', () => {
+    expect(() => cleanupSpecs({ name: 'bad', generated_data: [{ path: '.bad' }] })).toThrow('marker must be a non-empty string')
+    expect(() => cleanupSpecs({ name: 'bad', generated_data: [{ path: '../outside', marker: 'project.json' }] })).toThrow('relative contained path')
   })
 })
 
@@ -120,54 +119,38 @@ describe('Beads provenance cleanup', () => {
 })
 
 describe('path cleanup', () => {
-  test('legacy declarations require their declared marker and remove only the declared path', () => {
-    const root = reset('path-legacy')
+  test('requires the declared marker and removes only the declared generated-data path', () => {
+    const root = reset('path-marker')
     const generated = join(root, '.map')
     mkdirSync(generated)
-    writeFileSync(join(generated, 'project.json'), '{}')
     writeFileSync(join(root, 'keep.txt'), 'keep')
-    const detected = detectGeneratedCleanup(root, {
+    const manifest = {
       name: 'map',
       generated_data: [{ path: '.map', marker: 'project.json', description: 'Map data' }],
-    })
+    }
+
+    expect(detectGeneratedCleanup(root, manifest)).toHaveLength(0)
+    writeFileSync(join(generated, 'project.json'), '{}')
+    const detected = detectGeneratedCleanup(root, manifest)
     expect(detected).toHaveLength(1)
     removeGeneratedCleanup(root, detected[0]!)
     expect(existsSync(generated)).toBe(false)
     expect(existsSync(join(root, 'keep.txt'))).toBe(true)
   })
 
-  test('new declarations require the exact JLS ownership marker and recheck it before deletion', () => {
-    const root = reset('path-owned')
+  test('rechecks the identifying marker immediately before deletion', () => {
+    const root = reset('path-recheck')
     const generated = join(root, '.map')
     mkdirSync(generated)
     writeFileSync(join(generated, 'project.json'), '{}')
     const manifest = {
       name: 'map',
-      generated_data: [{
-        path: '.map',
-        marker: 'project.json',
-        ownership_marker: '.jls-owned.json',
-        description: 'Map data',
-      }],
+      generated_data: [{ path: '.map', marker: 'project.json', description: 'Map data' }],
     }
-
-    expect(detectGeneratedCleanup(root, manifest)).toHaveLength(0)
-    writeFileSync(join(generated, '.jls-owned.json'), JSON.stringify({
-      format: 1,
-      owner: 'jls',
-      kind: 'generated-data',
-      skill: 'map',
-    }))
     const detected = detectGeneratedCleanup(root, manifest)
     expect(detected).toHaveLength(1)
-
-    writeFileSync(join(generated, '.jls-owned.json'), JSON.stringify({
-      format: 1,
-      owner: 'jls',
-      kind: 'generated-data',
-      skill: 'other',
-    }))
-    expect(() => removeGeneratedCleanup(root, detected[0]!)).toThrow('ownership contract no longer matches')
+    rmSync(join(generated, 'project.json'))
+    expect(() => removeGeneratedCleanup(root, detected[0]!)).toThrow('identifying marker no longer exists')
     expect(existsSync(generated)).toBe(true)
   })
 })
