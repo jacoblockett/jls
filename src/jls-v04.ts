@@ -23,6 +23,7 @@ import {
   type DetectedCleanup,
   type RawSkillManifest,
 } from './generated-cleanup'
+import { prepareInstallerSelfUninstall } from './self-uninstall'
 import { main as lifecycleMain } from './jls-v04-core'
 import installerManifest from '../manifest.json'
 import catalog from '../catalog.json'
@@ -840,33 +841,6 @@ function installerExecutable(): string {
   return canonicalPath(process.execPath)
 }
 
-function scheduleInstallerUninstall(executable: string, dataRoot: string): void {
-  if (isWindows) {
-    const escapedExecutable = executable.replaceAll('"', '""')
-    const escapedDataRoot = dataRoot.replaceAll('"', '""')
-    const command = [
-      'ping 127.0.0.1 -n 2 >nul',
-      `if exist "${escapedDataRoot}" rmdir /s /q "${escapedDataRoot}"`,
-      `del /f /q "${escapedExecutable}"`,
-    ].join(' & ')
-    const child = spawn('cmd.exe', ['/d', '/s', '/c', command], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-    })
-    child.unref()
-    return
-  }
-  const child = spawn('/bin/sh', [
-    '-c',
-    'sleep 1; rm -rf -- "$1"; rm -f -- "$2"',
-    'jls-uninstall',
-    dataRoot,
-    executable,
-  ], { detached: true, stdio: 'ignore' })
-  child.unref()
-}
-
 async function updateInstallerWizard(state: WizardState): Promise<NavResult<number>> {
   ensureIntro(state)
   const executable = installerExecutable()
@@ -897,8 +871,17 @@ async function uninstallInstallerWizard(state: WizardState): Promise<NavResult<n
   prompts.note('This will uninstall the current installer binary file from the location you launched it from and remove installer-owned metadata and tooling. Doing so will immediately end the current session. It will not, however, remove or uninstall any currently installed skills, agent files, agent instruction injections, skill runtimes, or generated data from skills.')
   const proceed = await chooseConfirmation(state, 'installer-uninstall.confirm', true)
   if (proceed === BACK_SIGNAL) return BACK_SIGNAL
-  scheduleInstallerUninstall(executable, installerDataRoot())
-  prompts.outro()
+
+  const spinner = prompts.spinner({ withGuide: false })
+  spinner.start('Uninstalling JLS')
+  let completion
+  try {
+    completion = await prepareInstallerSelfUninstall(executable, installerDataRoot())
+  } finally {
+    spinner.clear()
+  }
+
+  if (completion === 'complete') finishOperation('success')
   return 0
 }
 
