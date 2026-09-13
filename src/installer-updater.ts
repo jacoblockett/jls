@@ -63,7 +63,6 @@ export type InstallerUpdate = {
 export type GeneratedDataSpec = {
   path: string
   marker?: string
-  ownership_marker?: string
 }
 
 export type HarnessResources = Record<string, Record<string, string[]>>
@@ -372,9 +371,6 @@ export function parseSkillPackageManifest(value: unknown): SkillPackageManifest 
           marker: entry.marker === undefined
             ? undefined
             : packagePath(entry.marker, `${raw.name} generated_data[${index}].marker`),
-          ownership_marker: entry.ownership_marker === undefined
-            ? undefined
-            : packagePath(entry.ownership_marker, `${raw.name} generated_data[${index}].ownership_marker`),
         }
       })
     })()
