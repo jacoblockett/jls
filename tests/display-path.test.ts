@@ -3,9 +3,9 @@ import { join, resolve } from 'node:path'
 import { displayManagedPath } from '../src/display-path'
 
 describe('scope-localized path rendering', () => {
-  test('keeps the selected root intact and localizes descendants to that root name', () => {
+  test('localizes the selected root and descendants to the selected root name', () => {
     const root = resolve('tmp', 'test', 'v1')
-    expect(displayManagedPath(root, root)).toBe(root)
+    expect(displayManagedPath(root, root)).toBe('/v1')
     expect(displayManagedPath(root, join(root, '.map'))).toBe('/v1/.map')
     expect(displayManagedPath(root, join(root, '.jls', 'map', 'bin'))).toBe('/v1/.jls/map/bin')
   })
