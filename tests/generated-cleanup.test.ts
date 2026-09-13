@@ -19,10 +19,15 @@ function reset(name: string): string {
 }
 
 describe('generated cleanup manifest contract', () => {
-  test('supports bounded paths and explicit Beads metadata cleanup', () => {
+  test('supports bounded paths, ownership markers, and explicit Beads metadata cleanup', () => {
     const specs = cleanupSpecs({
       name: 'example',
-      generated_data: [{ path: '.example', marker: 'project.json', description: 'Example data' }],
+      generated_data: [{
+        path: '.example',
+        marker: 'project.json',
+        ownership_marker: '.jls-owned.json',
+        description: 'Example data',
+      }],
       generated_cleanup: [{
         kind: 'beads-metadata',
         description: 'Generated issues',
@@ -31,7 +36,13 @@ describe('generated cleanup manifest contract', () => {
       }],
     })
     expect(specs).toEqual([
-      { kind: 'path', path: '.example', marker: 'project.json', description: 'Example data' },
+      {
+        kind: 'path',
+        path: '.example',
+        marker: 'project.json',
+        ownershipMarker: '.jls-owned.json',
+        description: 'Example data',
+      },
       {
         kind: 'beads-metadata',
         description: 'Generated issues',
@@ -109,8 +120,8 @@ describe('Beads provenance cleanup', () => {
 })
 
 describe('path cleanup', () => {
-  test('requires the declared marker and removes only the declared path', () => {
-    const root = reset('path')
+  test('legacy declarations require their declared marker and remove only the declared path', () => {
+    const root = reset('path-legacy')
     const generated = join(root, '.map')
     mkdirSync(generated)
     writeFileSync(join(generated, 'project.json'), '{}')
@@ -123,5 +134,40 @@ describe('path cleanup', () => {
     removeGeneratedCleanup(root, detected[0]!)
     expect(existsSync(generated)).toBe(false)
     expect(existsSync(join(root, 'keep.txt'))).toBe(true)
+  })
+
+  test('new declarations require the exact JLS ownership marker and recheck it before deletion', () => {
+    const root = reset('path-owned')
+    const generated = join(root, '.map')
+    mkdirSync(generated)
+    writeFileSync(join(generated, 'project.json'), '{}')
+    const manifest = {
+      name: 'map',
+      generated_data: [{
+        path: '.map',
+        marker: 'project.json',
+        ownership_marker: '.jls-owned.json',
+        description: 'Map data',
+      }],
+    }
+
+    expect(detectGeneratedCleanup(root, manifest)).toHaveLength(0)
+    writeFileSync(join(generated, '.jls-owned.json'), JSON.stringify({
+      format: 1,
+      owner: 'jls',
+      kind: 'generated-data',
+      skill: 'map',
+    }))
+    const detected = detectGeneratedCleanup(root, manifest)
+    expect(detected).toHaveLength(1)
+
+    writeFileSync(join(generated, '.jls-owned.json'), JSON.stringify({
+      format: 1,
+      owner: 'jls',
+      kind: 'generated-data',
+      skill: 'other',
+    }))
+    expect(() => removeGeneratedCleanup(root, detected[0]!)).toThrow('ownership contract no longer matches')
+    expect(existsSync(generated)).toBe(true)
   })
 })
