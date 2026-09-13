@@ -18,7 +18,6 @@ $ready = $false
 $failNode = [char]0x2716
 $guide = [char]0x2502
 $finalBranch = [char]0x2514
-$successNode = [char]0x25C6
 
 function Remove-FinalizerFile {
   try { Remove-Item -LiteralPath $finalizerFile -Force -ErrorAction SilentlyContinue } catch {}
@@ -68,7 +67,6 @@ try {
 
   try { Remove-Item -LiteralPath $errorFile -Force -ErrorAction SilentlyContinue } catch {}
   Remove-FinalizerFile
-  [Console]::Out.WriteLine($successNode.ToString() + '  Done.')
   exit 0
 } catch {
   $message = $_.Exception.Message
