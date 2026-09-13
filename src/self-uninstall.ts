@@ -17,7 +17,7 @@ $ready = $false
 $failNode = [char]0x2716
 $guide = [char]0x2502
 $finalBranch = [char]0x2514
-$successNode = [char]0x25C7
+$successNode = [char]0x25C6
 
 function Save-Failure([string]$message) {
   try {
@@ -33,8 +33,7 @@ function Save-Failure([string]$message) {
   if ($ready) {
     [Console]::Error.WriteLine($failNode.ToString() + '  JLS could not be fully uninstalled.')
     [Console]::Error.WriteLine($guide.ToString())
-    [Console]::Error.WriteLine($guide.ToString() + '  ' + $message)
-    [Console]::Error.WriteLine($finalBranch.ToString())
+    [Console]::Error.WriteLine($finalBranch.ToString() + '  ' + $message)
   }
 }
 
@@ -64,7 +63,6 @@ try {
 
   try { Remove-Item -LiteralPath $errorFile -Force -ErrorAction SilentlyContinue } catch {}
   [Console]::Out.WriteLine($successNode.ToString() + '  Done.')
-  [Console]::Out.WriteLine($finalBranch.ToString())
   exit 0
 } catch {
   $message = $_.Exception.Message
@@ -149,6 +147,10 @@ export function windowsFinalizerScript(): string {
   return WINDOWS_FINALIZER
 }
 
+export function encodeWindowsFinalizer(script = WINDOWS_FINALIZER): string {
+  return Buffer.from(script, 'utf16le').toString('base64')
+}
+
 export async function armWindowsSelfUninstall(executable: string, dataRoot: string): Promise<void> {
   assertExecutable(executable)
   const token = `${process.pid}-${randomUUID()}`
@@ -158,14 +160,16 @@ export async function armWindowsSelfUninstall(executable: string, dataRoot: stri
   rmSync(readyFile, { force: true })
   rmSync(errorFile, { force: true })
 
+  // -EncodedCommand avoids the Windows command-line quoting layer entirely. PowerShell
+  // requires this payload to be UTF-16LE before base64 encoding.
   const child = spawn('powershell.exe', [
     '-NoLogo',
     '-NoProfile',
     '-NonInteractive',
     '-ExecutionPolicy',
     'Bypass',
-    '-Command',
-    WINDOWS_FINALIZER,
+    '-EncodedCommand',
+    encodeWindowsFinalizer(),
   ], {
     detached: true,
     stdio: ['ignore', 'inherit', 'inherit'],
