@@ -46,13 +46,23 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).toContain('The following skills you selected have data generated beyond its installation. If you would like to retain any of this data, deselect the options below before continuing.')
   })
 
-  test('instruction injection uses the requested plural wording and a skill-specific single confirmation', () => {
+  test('instruction injection uses the requested plural wording and a skill-specific Yes No decision', () => {
     expect(source).toContain('The following skills have instructions to inject into your ${names} ${noun}. Deselect any of these you wish not to be injected. See above for more information.')
     expect(source).toContain('The ${displaySkillName(skill)} skill has instructions to inject into your ${names} ${noun}. Would you like them to be injected? See above for more information.')
-    expect(source).toContain("{ value: 'inject', label: 'Inject' }")
-    expect(source).toContain("{ value: 'skip', label: 'Do not inject' }")
+    expect(source).toContain("{ value: 'yes', label: 'Yes' }")
+    expect(source).toContain("{ value: 'no', label: 'No' }")
+    expect(source).toContain("if (selected === 'yes') injectedSkills = [skill]")
+    expect(source).not.toContain("{ value: 'inject', label: 'Inject' }")
+    expect(source).not.toContain("{ value: 'skip', label: 'Do not inject' }")
     expect(source).toContain('AI tools can use instruction files to receive extra directions about how they should work in a project.')
     expect(source).not.toContain('You can opt out of any of these if you like.')
+  })
+
+  test('install state is backed by the manifest plus declared skill and harness files', () => {
+    expect(source).toContain('const manifest = installedPackageManifest(skillPath)')
+    expect(source).toContain('return skillFilesPresent(skillPath, manifest) && harnessResourcesPresent(manifest, agent, scope)')
+    expect(source).toContain('existsSync(path) && statSync(path).isFile()')
+    expect(source).toContain('existsSync(destination) || !statSync(destination).isFile()')
   })
 
   test('install always presents the full skill catalog and marks only fully installed skills unavailable', () => {
@@ -110,8 +120,9 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).toContain("prompts.log.warn('No supported AI harnesses were detected.')")
   })
 
-  test('No and Backspace share the same confirmation result', () => {
+  test('confirmation No and Backspace share the same result without changing the injection No decision', () => {
     expect(source).toContain("if (choice === BACK_SIGNAL || choice === 'no') return BACK_SIGNAL")
+    expect(source).toContain("if (selected === 'yes') injectedSkills = [skill]")
   })
 
   test('uses Clack path selection for custom scopes', () => {
@@ -138,10 +149,10 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).toContain("Generated data: ${removeData.has(group.skill) ? 'Remove' : 'Keep'}")
   })
 
-  test('collisions are disclosed and warning wrapping leaves continuation guides to Clack', () => {
+  test('collisions are file-granular and warning wrapping leaves continuation guides to Clack', () => {
     expect(source).toContain("prompts.note(collisionSummary(collisions), 'Collisions detected')")
-    expect(source).toContain('The following directories/files would be occupied/overwritten should installation continue. Installation in this case would be destructive and could cause permanent loss of data.')
-    expect(source).toContain("prompts.log.warn(wrapLogMessage('See above. Installation has failed due to colliding directories/files. Would you like to continue with installation despite this collision?'))")
+    expect(source).toContain('The following existing paths conflict with files JLS needs to install. Continuing will remove or overwrite those exact paths and could cause permanent loss of data.')
+    expect(source).toContain("prompts.log.warn(wrapLogMessage('See above. Installation has failed due to colliding files/paths. Would you like to continue with installation despite this collision?'))")
     expect(source).toContain('const width = columns - 3')
     expect(source).toContain("return lines.join('\\n')")
     expect(source).not.toContain("styleText('gray', '│')")
