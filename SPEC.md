@@ -1,424 +1,313 @@
-# JLS Installer
+# JLS Installer 0.4 Contract
 
-Status: accepted lifecycle contract for the 0.4 installer redesign.
+This document describes the accepted JLS installer behavior for the 0.4 implementation line. It is normative for installer UX, ownership, lifecycle behavior, cross-platform semantics, and release automation.
 
-JLS is the installer, updater, uninstaller, and lifecycle utility for the JLS skill catalog. Skill source/runtime/package behavior lives in each skill repository. JLS owns scope selection, harness placement, managed instruction integration, update discovery, bounded generated-data cleanup, and installer self-management.
+## Product boundary
 
-## Supported harnesses
+JLS installs and manages a curated set of AI coding-agent skills. Skills remain independently versioned and independently released. The installer owns discovery, installation, configuration, updates, uninstallation, installer updates, and installer self-uninstallation; it does not absorb skill behavior into the installer.
 
-Initial supported harnesses:
+The current supported harnesses are OpenAI Codex and Claude Code. Harness-specific paths and filenames are adapter concerns. The user-facing behavior is platform-agnostic.
 
-- OpenAI Codex
-- Claude Code
+## Cross-platform invariant
 
-Harness adapters own detection, skill locations, instruction files, and harness-specific resource paths.
+JLS is unapologetically cross-platform across Windows 11+, macOS, and Linux.
 
-Detection is internal. Interactive installation presents only detected supported harnesses. Explicit deterministic `--agent` values remain allowed.
+The behavioral contract must not be designed as Windows-first or Unix-first. Platform-specific mechanisms are allowed and preferred when they are the native way to provide equivalent semantics and guarantees.
 
-## Public CLI
-
-```text
-jls install [skills...] [--scope user|cwd|PATH] [--agent AGENT]... [--instructions|--no-instructions]
-jls update [skills...] [--scope user|cwd|PATH] [--agent AGENT]... [--instructions|--no-instructions]
-jls uninstall [skills...] [--scope user|cwd|PATH] [--agent AGENT]...
-```
-
-A skill-first invocation may continue to mean install.
-
-`--scope` accepts:
+Canonical installer targets are:
 
 ```text
-user
-cwd
-PATH
+windows-x64
+windows-arm64
+macos-x64
+macos-arm64
+linux-x64-gnu
+linux-arm64-gnu
+linux-x64-musl
+linux-arm64-musl
 ```
 
-Interactive simplification must not remove deterministic custom-path support.
+## Version authority
 
-## Scope invariant
+The repository root `manifest.json` is the installer product and release version authority. `package.json` is not a release manifest.
 
-Scope and harness are orthogonal.
+Implementation and test work for 0.4 must keep the installer manifest at `0.3.2` until explicit release approval. The intended later stable version is `0.4.0`; it must not be applied merely to test the implementation.
 
-- `cwd` targets only the invocation working directory.
-- `user` targets only the user/global scope.
-- an explicit path targets only that canonicalized path.
+A stable release is dispatched only when the manifest `.version` increases to a valid higher semantic version. An unchanged version performs no stable dispatch. A decrease or invalid version fails closed.
 
-A detected machine-level harness never authorizes installation into another scope.
+## Interactive entry point
 
-Skill runtime/tooling is scope-local:
+Launching the compiled installer without lifecycle arguments opens the interactive installer.
+
+The home screen is exactly:
 
 ```text
-user scope       ~/.jls/<skill>/
-project/custom   <scope>/.jls/<skill>/
+Manage skills on the current path
+Manage skills on the global path
+Manage skills on a custom path
+Manage installer
 ```
 
-Do not widen, relocate, or duplicate a requested scope.
+Custom-path selection uses Clack's built-in path prompt and accepts only an existing directory.
 
-## Path normalization
+Backspace goes back one immediate meaningful step. At every confirmation, choosing `No` has exactly the same navigation effect as Backspace.
 
-Custom paths support `~`, supported environment variables, relative components, `.`/`..`, Windows separator/casing normalization, and existing filesystem casing where safely available.
+## Scope management
 
-Empty custom-path submission is a validation error, not an exception.
+For a scope with no installed skills, JLS goes directly into installation.
 
-## Installation discovery
-
-There is no authoritative central install receipt registry.
-
-The selected scope's supported harness locations are authoritative for installed-skill discovery. A managed installation requires a valid installed `manifest.json` whose `name` matches its catalog/discovery identity.
-
-`SKILL.md` is agent-facing content, not installer metadata.
-
-The package manifest remains authoritative for skill identity, version, compatibility, declared files/resources/runtime, instruction fragment, and declared cleanup semantics.
-
-## Interactive navigation
-
-Run without an explicit command:
+For a scope with installed skills, the available actions are:
 
 ```text
-JLS Installer v<version>
-
-What would you like to do?
-- Manage skills on the current path
-- Manage skills on the global path
-- Manage skills on a custom path
-- Manage installer
+Install new skills
+Check for updates
+Uninstall existing skills
 ```
 
-The three skill scope choices enter the same management menu:
+`Check for updates` and `Uninstall existing skills` are omitted when they are unavailable. They are not rendered as disabled choices.
 
-```text
-What would you like to do?
-- Install new skills
-- Check for updates
-- Uninstall existing skills
-```
+## Installing skills
 
-`Check for updates` and `Uninstall existing skills` are unavailable when no managed skill is installed at that scope.
-
-Backspace returns one interactive step. Escape exits. No visible fake `Go back` or `Cancel` rows are added.
-
-Prompt state remains process-local and scoped by operation/scope/step. Previously entered custom paths, cursors, and multiselect values are restored when still valid. Destructive confirmations do not remember a prior affirmative answer.
-
-## Controls
-
-Single select footer:
-
-```text
-↑/↓ navigate • Enter confirm • Backspace back • Esc exit
-```
-
-Multiselect footer:
-
-```text
-↑/↓ navigate • Space select • Enter confirm • A toggle all • Backspace back • Esc exit
-```
-
-`I` may remain as an undisclosed invert shortcut.
-
-Lifecycle confirmations use a vertical single-select:
-
-```text
-Continue?
-Yes
-No
-```
-
-Install/update may begin on Yes. Destructive uninstall begins on No.
-
-## Install new skills
-
-### Skill picker
-
-Prompt:
+The skill picker asks:
 
 ```text
 Which skills would you like to install?
 ```
 
-A catalog skill is disabled only when it is already installed on every detected supported harness for the selected scope.
+If the selected scope has no detected installations and JLS enters installation directly, it may provide that immediate context before the same question.
 
-If the skill is installed on only some detected harnesses, keep it selectable.
-
-This is installation-presence logic, not version-update logic. Stale installed skills belong to `Check for updates`.
-
-### Harness picker
-
-After skill selection:
+Skill descriptions remain visible while the skill is focused. Current catalog presentation includes:
 
 ```text
-Which AI harnesses should receive these skills?
+Map
+Tasks (Compiles a goal into a taskset using Beads)
 ```
 
-Show only detected supported harnesses.
-
-A harness is disabled only when every selected skill is already installed for that harness. If at least one selected skill is missing there, the harness remains selectable.
-
-### Instruction integration
-
-After harness selection, explain the applicable instruction files using adapter-owned filenames. Current examples are `AGENTS.md` and `CLAUDE.md`.
-
-The explanation is generic and does not hardcode a particular skill.
-
-Then present only selected skills that provide a managed instruction fragment:
+A skill already installed for every feasible detected harness is crossed out and suffixed:
 
 ```text
-Which skills would you like to add to AGENTS.md and CLAUDE.md?
+(already installed)
 ```
 
-Instruction-capable skills are selected by default. Users may opt out individually.
+Install-new never silently updates a stale installation. Updating is a separate user action.
 
-The selected subset applies uniformly across selected harness instruction files. Do not create a harness-by-harness matrix.
+### Harness selection
 
-Managed content uses skill-specific markers and preserves surrounding user content.
+When more than one feasible detected harness exists, the prompt is exactly:
 
-### Confirmation
+```text
+The following supported AI harnesses were detected. You can opt out of any of these if you like.
+```
 
-Keep the summary concise:
+All feasible detected harnesses are selected by default. A single feasible harness may be selected implicitly rather than showing a redundant screen.
+
+### Instruction injection
+
+For selected skills that provide managed instructions, JLS first explains instruction files. The explanation begins:
+
+```text
+AI tools can use instruction files to receive extra directions about how they should work in a project.
+```
+
+It then identifies the filename used by each selected harness and explains that JLS can add skill instructions without replacing unrelated instructions already present.
+
+The selection prompt is:
+
+```text
+The following skills have instructions to inject into your AGENTS.md/CLAUDE.md file. You can opt out of any of these if you like. See above for an explanation of these files.
+```
+
+Mechanical filename and singular/plural adaptation is allowed when only one instruction filename is involved.
+
+All capable selected skills are selected for instruction injection by default.
+
+Managed instruction content is bounded by exact JLS ownership markers. Existing unrelated file content is preserved. Ambiguous or malformed JLS marker state fails closed rather than guessing ownership.
+
+Writes use a same-directory temporary file followed by rename/replace semantics. JLS must not deliberately delete the destination first and create an avoidable loss window.
+
+### Install confirmation
+
+The summary begins with the scope-appropriate form of:
 
 ```text
 JLS Installer will install the following skills on your current path:
-- Tasks
-- Other Skill
-
-Continue?
-Yes
-No
 ```
 
-Adapt wording for global/custom path.
+`current`, `global`, and `custom` are adapted mechanically. The concrete resolved path is displayed. Skill bullets use the actual `•` glyph.
 
-### Execution semantics
+Confirmation is:
 
-For each selected skill × selected harness target:
+```text
+Continue?
+Yes / No
+```
 
-- missing: install it;
-- current/newer with requested instruction-state mismatch: change only managed instruction configuration;
-- already satisfied: do nothing;
-- stale: do not update through `Install new skills`.
+## Updating skills
 
-A newer installed skill is never downgraded.
+JLS checks the stable release metadata and only offers skills for which at least one installed harness target is older than the available stable version.
 
-Configuration-only work must not rewrite the skill/runtime simply to change managed instruction state.
+The picker text is exactly:
 
-Install does not perform semantic project initialization.
+```text
+The following updates are available. Please select which you would like to install.
+```
 
-## Check for updates
-
-The scope management menu exposes updates only when installed skills exist.
-
-On entry show an activity indicator while release metadata is fetched.
-
-If no applicable updates exist:
+If none are available, JLS uses `prompts.log.info` with exactly:
 
 ```text
 No updates were found.
 ```
 
-Then return to the scope management menu.
+A selected skill update changes only stale harness targets. A current target is left untouched. A target newer than the stable version is left untouched and must never be downgraded. Unknown/unparseable installed versions are not destructively replaced by the update path merely because another harness target for the same skill is stale.
 
-If updates exist:
+The update is confirmed before execution.
 
-```text
-The following updates are available. Please select which you would like to install.
-- Tasks  0.2.1 -> 0.3.0
-```
+## Uninstalling skills
 
-Then show a concise summary and standard confirmation.
+The user selects installed skills first.
 
-Update:
-
-- operates only on already-installed targets;
-- does not add a new harness;
-- replaces the complete manifest-owned installed representation;
-- preserves unrelated files and generated semantic/project data;
-- preserves existing instruction-injection state unless an explicit CLI override is supplied;
-- never downgrades a newer installed version.
-
-## Uninstall existing skills
-
-Prompt:
+If a selected skill has detectable generated state beyond its installed files, JLS asks exactly:
 
 ```text
-Which skills would you like to uninstall?
+The following skills you selected have data generated beyond its installation. If you would like to retain any of this data, deselect the options below before continuing.
 ```
 
-Show only managed skills installed at the selected scope.
+Detected generated-data cleanup options are selected by default.
 
-Bare-wizard uninstall removes the selected skill from every installed supported harness target at that selected scope. Explicit CLI `--agent` continues to narrow targets.
-
-Uninstall removes:
-
-- skill discovery/resource directory;
-- harness-specific resources owned by that skill;
-- matching installer-managed instruction block;
-- final-harness scope-local skill tooling when no harness integration remains.
-
-It preserves unrelated instruction content, harness parent directories, unrelated harness config, and generated data unless the integrated generated-data choice explicitly selects that data for removal.
-
-## Generated data during uninstall
-
-Generated-data cleanup is part of interactive skill uninstall. It is not a separate home-screen action.
-
-After selecting skills, detect removable generated data only for those selected skills and only within the selected scope.
-
-If detected:
+Current generated-data descriptions are:
 
 ```text
-The following selected skills have generated data that can also be removed.
-- Map (SurrealKV database with surviving intent information from a previous session)
-- Tasks (Beads tasks/issues generated from a goal/intent)
+Map: SurrealKV database with surviving intent information from a previous session
+Tasks: Beads tasks/issues generated from a goal/intent
 ```
 
-Detected cleanup options are selected by default. Deselecting a skill preserves its generated data.
+If no generated data is actually selected for removal, the uninstall confirmation stays flat:
 
-Confirmation explicitly states `Generated data: Remove` or `Generated data: Keep` for skills with detected generated data.
+```text
+• Map
+• Tasks
+```
 
-Deterministic CLI uninstall preserves generated data unless a future explicit cleanup CLI contract is accepted.
+When generated data is actually selected for removal, only relevant skills gain nested detail:
 
-### Path-owned generated data
+```text
+• Skill
+  • Skill/agent files: Remove
+  • Generated data: Remove
+```
 
-A skill may declare bounded path-owned generated data in `generated_data`:
+A relevant skill whose generated state is being kept may show `Generated data: Keep` when nested detail is already necessary for the transaction.
+
+### Map generated-state ownership
+
+Map-generated state is bounded to the manifest-declared `.map` path. New ownership-aware packages require the exact JLS ownership marker declared by the package. Legacy marker evidence may bridge a missing new ownership marker only when positively identified; an invalid ownership marker always fails closed.
+
+JLS never removes generated paths outside the selected scope.
+
+### Tasks generated-state ownership
+
+Tasks owns only Beads issues newly created by Tasks with exact structured metadata:
 
 ```json
-{
-  "path": ".map",
-  "marker": "project.json",
-  "description": "SurrealKV database with surviving intent information from a previous session"
-}
+{"jls-tasks":"owned"}
 ```
 
-Rules:
+Existing or reused issues never become Tasks-owned merely because Tasks reads or updates them.
 
-- path is relative to selected scope;
-- absolute paths and traversal are rejected;
-- optional marker must positively identify the data;
-- only the declared path is recursively removed;
-- neighboring files remain untouched.
-
-### Non-path cleanup
-
-A skill may declare installer cleanup semantics that do not imply ownership of a filesystem directory through `generated_cleanup`.
-
-Initial supported kind:
-
-```json
-{
-  "kind": "beads-metadata",
-  "description": "Beads tasks/issues generated from a goal/intent",
-  "metadata_key": "jls-tasks",
-  "metadata_value": "owned"
-}
-```
-
-For `beads-metadata` cleanup:
-
-- operate only on a Beads database found in the selected scope;
-- query structured issue metadata using exact `key=value` filtering;
-- verify each returned issue's structured metadata still contains the exact key/value;
-- never infer ownership from title, description, notes, labels, comments, or other prose;
-- re-query immediately before deletion;
-- delete only the exact matching IDs;
-- never delete the entire Beads database.
-
-The installer may cache raw package manifests under installer-owned metadata so cleanup declarations remain available after package operations. That cache is not an installation receipt.
-
-## Tasks provenance contract
-
-Tasks-created Beads issues use exact structured metadata:
-
-```json
-{
-  "jls-tasks": "owned"
-}
-```
-
-Only newly created Tasks issues receive this marker.
-
-A pre-existing issue that Tasks reuses or updates must not be marked Tasks-owned merely because Tasks touched it.
-
-Tasks' Designer writes the marker with current live `bd create --metadata` syntax and reads it back. Tasks' final Reviewer verifies correct ownership marking.
-
-## Managed instruction integration
-
-Managed blocks use deterministic markers such as:
-
-```md
-<!-- jls:begin map -->
-...
-<!-- jls:end map -->
-```
-
-Required behavior:
-
-- preserve unmanaged/user-authored content;
-- create instruction files only when necessary;
-- repeated install/update is idempotent;
-- update only the matching owned block;
-- allow independent blocks from multiple skills;
-- use safe/atomic writes;
-- reject malformed/duplicate/conflicting boundaries rather than guessing;
-- uninstall removes only the matching managed block;
-- if removal leaves the instruction file empty, retain the empty file;
-- opting out leaves unrelated existing content untouched.
-
-Instruction fragments render actual scope-local runtime paths where needed.
-
-## Manage installer
-
-Top-level `Manage installer` shows:
+Detection uses the live `bd` CLI and exact metadata filtering:
 
 ```text
-What would you like to do?
-- Check for updates
-- Uninstall this installer
+bd list --metadata-field jls-tasks=owned --json --limit 0
 ```
 
-### Check for updates
+JLS verifies returned issue metadata structurally. Titles, descriptions, notes, labels, comments, and prose are never used to infer ownership.
 
-Show an activity indicator while checking.
-
-When current:
+Immediately before deletion JLS re-runs the exact metadata query and deletes only the IDs that still match:
 
 ```text
-Up to date.
+bd delete <id...> --force
 ```
 
-Then return to installer management.
+Deletion may be batched. JLS never deletes `.beads` itself. If `bd` is absent, generated Beads state is preserved. If `bd` is present but cannot safely inspect or delete the exact owned set, cleanup fails closed rather than broadening ownership.
 
-When newer:
+## Execution feedback
+
+Interactive lifecycle subprocess output is captured rather than dumped into the TUI.
+
+Each selected skill receives a spinner for its operation. After the item completes:
+
+- install success uses `prompts.log.success`;
+- update success uses `prompts.log.info`;
+- uninstall success uses `prompts.log.success`;
+- failure uses `prompts.log.error` and stops the transaction safely.
+
+After a successful install or uninstall, final `Done.` uses `prompts.log.success`. After a successful update, final `Done.` uses `prompts.log.info`.
+
+Normal completed interactive operations then render a real Clack `outro` branch.
+
+## Installer management
+
+`Manage installer` offers installer update and installer uninstallation.
+
+### Installer update
+
+If no installer update exists, JLS uses `prompts.log.info` with exactly:
 
 ```text
-An update is available: v0.2.1 -> v0.3.0.
-
-Updating will end this session. You must relaunch JLS afterward.
-
-Continue?
-Yes
-No
+No updates were found.
 ```
 
-No returns to installer management.
-
-Yes downloads/verifies/stages/replaces the current-target executable and ends the session without post-confirm status narration.
-
-Installer update preserves installed skills, skill runtimes/tooling, managed instruction integrations, and generated skill data.
-
-### Uninstall this installer
-
-Warning:
+When an update exists, the note is:
 
 ```text
-This will uninstall the JLS installer and its installer-owned metadata and tooling. It will not remove installed skills, skill instruction integrations, skill runtimes, or skill-generated data.
+An update was found. Would you like to update from v0.2.1 to v0.3.0? If you choose to update, this current session will end. You must relaunch the installer after updating.
 ```
 
-Then use safe-default `Continue?`.
+The versions are dynamic.
 
-On Yes, a silent detached helper removes:
+The downloaded replacement is SHA-256 verified and staged beside the running executable.
 
-- installer executable;
-- installer-owned cached metadata/tooling.
+On POSIX, replacing the executable pathname is performed synchronously with same-directory rename semantics and verified before returning.
 
-It preserves all skill-owned state and prints no post-confirm success/scheduling message.
+On Windows, JLS cannot replace its running executable directly. It therefore launches a transient PowerShell finalizer through `cmd.exe /c start "" /b` so the finalizer breaks out of Bun's kill-on-close Job Object. The finalizer:
+
+1. acquires a live handle to the exact JLS parent process before declaring readiness;
+2. writes a readiness signal while the parent is still alive;
+3. waits on that exact process handle with `WaitForExit()`;
+4. atomically replaces the executable using native Windows replace-existing/write-through semantics;
+5. verifies the new executable exists and the staged file is gone;
+6. reports an explicit diagnostic on failure.
+
+JLS does not use `ping`, `sleep`, blind detached deletion, or an arbitrary time delay to coordinate installer replacement.
+
+A successful installer update intentionally ends the current session; the user relaunches the installer afterward.
+
+### Installer uninstallation
+
+The note is exactly:
+
+```text
+This will uninstall the current installer binary file from the location you launched it from and remove installer-owned metadata and tooling. Doing so will immediately end the current session. It will not, however, remove or uninstall any currently installed skills, agent files, agent instruction injections, skill runtimes, or generated data from skills.
+```
+
+The semantic contract is:
+
+1. identify the exact running installer with `process.execPath`;
+2. remove that exact binary;
+3. remove only JLS installer-owned metadata/state/tooling;
+4. preserve installed skills, harness resources, managed instruction injections, skill runtimes, and generated skill data;
+5. verify filesystem postconditions;
+6. report success only after verified cleanup and report an explicit error otherwise.
+
+There is no persistent uninstaller.
+
+On Linux/macOS, the running executable pathname is unlinked synchronously, installer-owned state is removed, and both results are verified before success is rendered.
+
+On Windows, a transient PowerShell finalizer is launched through the same Bun Job Object breakaway mechanism used for installer replacement. Before the parent exits, the finalizer acquires the exact live parent process and signals readiness. It then waits on that process handle with `WaitForExit()`. After the parent terminates it deletes the exact executable and installer-owned state and verifies both postconditions.
+
+Because only the Windows finalizer can know whether post-parent deletion succeeded, it owns the final Windows success/error rendering. The parent must not claim success prematurely.
+
+No `ping`, `sleep`, arbitrary timer, or blind detached deletion is used for installer self-uninstallation.
 
 ## Package model
 
@@ -435,36 +324,23 @@ A package may declare:
 - path-owned generated data;
 - bounded non-path generated cleanup semantics.
 
-Unknown future manifest fields may be ignored by older package parsing only when doing so is safe. A new cleanup declaration must never be represented as an unsafe fake filesystem path merely for backward compatibility.
+Unknown future fields may be ignored only where doing so is safe. New cleanup semantics must never be represented as an unsafe fake filesystem path for backward compatibility.
+
+Downloaded package archives are hash-verified before extraction. Package-declared paths are containment-validated. Installer-owned runtime and generated-data paths use explicit ownership evidence before destructive replacement or cleanup.
 
 ## Release model
 
-JLS builds only the installer. Skill repositories own skill packages/runtime builds.
+JLS builds only the installer. Skill repositories own their skill packages and runtime builds.
 
-Canonical installer targets:
+The JLS stable release manifest references externally owned skill release manifests. Artifact selection is exact current target first, then an explicit `portable` fallback for skills only.
 
-```text
-windows-x64
-windows-arm64
-macos-x64
-macos-arm64
-linux-x64-gnu
-linux-arm64-gnu
-linux-x64-musl
-linux-arm64-musl
-```
+Public installer filenames remain target-qualified. Tasks publishes its portable package as `tasks.zip`.
 
-Exact public filenames remain target-qualified.
+Stable releases are version-gated by each repository's manifest version. Ordinary source edits may run lightweight version checks but must not create a new stable release when the version is unchanged.
 
-The installer release manifest references externally owned skill release manifests. Artifact selection is exact current target first, then explicit `portable` fallback for skills only.
+## Test-build trigger
 
-`manifest.json` in the JLS repository is the installer product/release version authority. `package.json` is not.
-
-Changing `manifest.json` to a higher semantic version dispatches the stable release workflow. Ordinary implementation commits must not trigger stable release.
-
-## Test build trigger
-
-Normal pushes must not build every installer target.
+Normal implementation pushes must not build every installer target merely to obtain a test signal.
 
 A lightweight workflow listens for creation of an ephemeral branch matching:
 
@@ -472,23 +348,23 @@ A lightweight workflow listens for creation of an ephemeral branch matching:
 jls-test/**
 ```
 
-For such a branch it:
+For JLS, it dispatches the existing non-release installer build from `main` and then deletes the trigger branch.
 
-1. dispatches existing `build.yml` on `main` with `action=build`;
-2. does not publish a release;
-3. deletes the ephemeral trigger branch.
+For Map, the test trigger dispatches the single `linux-x64-gnu` non-release target. Stable and nightly Map releases still build the complete supported target matrix.
 
 The intended assistant workflow is:
 
 1. complete and commit implementation work;
-2. create one `jls-test/<unique>` branch at the final `main` commit;
+2. create one `jls-test/<unique>` branch at the exact final `main` commit;
 3. report that the test build was triggered;
-4. do not wait for or poll the build result.
+4. do not wait for or poll the build result unless the user reports a failure or explicitly asks for inspection.
 
 No manifest version bump is required for a test build.
 
 ## 0.4 release boundary
 
-The implementation target is JLS 0.4.0, but implementation/testing must not change the installer `manifest.json` version until explicit release approval.
+The implementation target is JLS 0.4.0, but implementation/testing must not change the installer manifest from `0.3.2` until explicit release approval.
 
-The 0.4 stable build is triggered only by the later intentional manifest semantic-version increase.
+Map remains `0.4.0` and Tasks remains `0.2.0` until the user explicitly decides their next release versions. Do not invent replacement version numbers merely to publish source changes.
+
+Before the JLS 0.4 stable release, the skill release manifests referenced by JLS must correspond to skill packages that actually contain the source-level contracts intended for that release. A source commit existing after an older same-version stable package does not make that older package magically contain the newer behavior.
