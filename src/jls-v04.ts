@@ -1,5 +1,5 @@
 import * as prompts from '@clack/prompts'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { homedir, platform } from 'node:os'
 import { basename, dirname, join, normalize, resolve } from 'node:path'
@@ -23,6 +23,11 @@ import {
   type DetectedCleanup,
   type RawSkillManifest,
 } from './generated-cleanup'
+import {
+  detectInstallCollisions,
+  removeInstallCollisions,
+  type InstallCollision,
+} from './install-collision-override'
 import { prepareInstallerSelfUninstall } from './self-uninstall'
 import { main as lifecycleMain } from './jls-v04-core'
 import installerManifest from '../manifest.json'
@@ -415,25 +420,35 @@ function instructionFiles(agents: string[], scope: Scope): string[] {
   return [...new Set(agents.map((agent) => basename(agentPaths(agent, scope).instruction)))]
 }
 
+function instructionTarget(agents: string[], scope: Scope): { names: string; noun: string } {
+  const files = instructionFiles(agents, scope)
+  return {
+    names: files.length === 2 ? files.join('/') : humanList(files),
+    noun: files.length === 1 ? 'file' : 'files',
+  }
+}
+
 function instructionExplanation(agents: string[], scope: Scope): string {
   const sentences = agents.map((agent) => `${agentLabel(agent)} uses ${basename(agentPaths(agent, scope).instruction)}.`)
   return `AI tools can use instruction files to receive extra directions about how they should work in a project. ${sentences.join(' ')} JLS can add instructions for a skill to the appropriate file without replacing unrelated instructions that are already there.`
 }
 
 function instructionQuestion(agents: string[], scope: Scope): string {
-  const files = instructionFiles(agents, scope)
-  const names = files.length === 2 ? files.join('/') : humanList(files)
-  const noun = files.length === 1 ? 'file' : 'files'
-  const referent = files.length === 1 ? 'this file' : 'these files'
-  return `The following skills have instructions to inject into your ${names} ${noun}. You can opt out of any of these if you like. See above for an explanation of ${referent}.`
+  const { names, noun } = instructionTarget(agents, scope)
+  return `The following skills have instructions to inject into your ${names} ${noun}. Deselect any of these you wish not to be injected. See above for more information.`
 }
 
-function dimBullet(text: string, indent = ''): string {
-  return styleText('dim', `${indent}• ${text}`)
+function singleInstructionQuestion(skill: string, agents: string[], scope: Scope): string {
+  const { names, noun } = instructionTarget(agents, scope)
+  return `The ${displaySkillName(skill)} skill has instructions to inject into your ${names} ${noun}. Would you like them to be injected? See above for more information.`
+}
+
+function noteBullet(text: string, indent = ''): string {
+  return `${indent}${styleText('dim', '•')} ${text}`
 }
 
 function summaryPath(scope: Scope): string {
-  return styleText('italic', scope.root)
+  return styleText(['italic', 'dim'], normalizedPath(scope.root))
 }
 
 function installSummary(scope: Scope, skills: string[]): string {
@@ -442,7 +457,7 @@ function installSummary(scope: Scope, skills: string[]): string {
     '',
     summaryPath(scope),
     '',
-    ...skills.map((skill) => dimBullet(displaySkillName(skill))),
+    ...skills.map((skill) => noteBullet(displaySkillName(skill))),
   ].join('\n')
 }
 
@@ -452,7 +467,7 @@ function updateSummary(scope: Scope, groups: InstallGroup[], available: Record<s
     '',
     summaryPath(scope),
     '',
-    ...groups.map((group) => dimBullet(`${displaySkillName(group.skill)} (${updateStatus(group, available)})`)),
+    ...groups.map((group) => noteBullet(`${displaySkillName(group.skill)} (${updateStatus(group, available)})`)),
   ].join('\n')
 }
 
@@ -466,12 +481,20 @@ function uninstallSummary(
   const showGeneratedDetail = removeData.size > 0
   const lines = ['The following skills will be uninstalled:', '', summaryPath(scope), '']
   for (const group of groups) {
-    lines.push(dimBullet(displaySkillName(group.skill)))
+    lines.push(noteBullet(displaySkillName(group.skill)))
     if (!showGeneratedDetail || !cleanupSkills.has(group.skill)) continue
-    lines.push(dimBullet('Skill/agent files: Remove', '  '))
-    lines.push(dimBullet(`Generated data: ${removeData.has(group.skill) ? 'Remove' : 'Keep'}`, '  '))
+    lines.push(noteBullet('Skill/agent files: Remove', '  '))
+    lines.push(noteBullet(`Generated data: ${removeData.has(group.skill) ? 'Remove' : 'Keep'}`, '  '))
   }
   return lines.join('\n')
+}
+
+function collisionSummary(collisions: InstallCollision[]): string {
+  return [
+    'The following directories/files would be occupied/overwritten should installation continue. Installation in this case would be destructive and could cause permanent loss of data.',
+    '',
+    ...collisions.map((collision) => noteBullet(normalizedPath(collision.path))),
+  ].join('\n')
 }
 
 function installedVersions(group: InstallGroup): string[] {
@@ -546,26 +569,36 @@ function lifecycleArgs(scope: Scope, agents: string[]): string[] {
   return ['--scope', scopeArg(scope), ...agents.flatMap((agent) => ['--agent', agent])]
 }
 
-function runLifecycle(args: string[]): void {
+async function runLifecycle(args: string[]): Promise<void> {
   if (!Bun.isStandaloneExecutable) throw new Error('interactive lifecycle execution requires the compiled JLS installer')
-  const result = spawnSync(process.execPath, ['--core', ...args], {
+  const child = spawn(process.execPath, ['--core', ...args], {
     stdio: ['ignore', 'pipe', 'pipe'],
-    encoding: 'utf8',
     windowsHide: true,
   })
-  if (result.error) throw result.error
-  if (result.status !== 0) {
-    const detail = String(result.stderr || result.stdout || '').trim()
-    throw new Error(detail || `installer operation failed with exit code ${result.status ?? 1}`)
-  }
+  let stdout = ''
+  let stderr = ''
+  child.stdout?.on('data', (chunk) => { stdout += String(chunk) })
+  child.stderr?.on('data', (chunk) => { stderr += String(chunk) })
+
+  await new Promise<void>((resolvePromise, reject) => {
+    child.once('error', reject)
+    child.once('close', (code, signal) => {
+      if (code === 0) {
+        resolvePromise()
+        return
+      }
+      const detail = (stderr || stdout).trim()
+      reject(new Error(detail || `installer operation failed${signal ? ` (${signal})` : ` with exit code ${code ?? 1}`}`))
+    })
+  })
 }
 
-function runLifecycleItem(
+async function runLifecycleItem(
   action: LifecycleAction,
   skill: string,
   args: string[],
   before?: () => void,
-): boolean {
+): Promise<boolean> {
   const name = displaySkillName(skill)
   const words = action === 'install'
     ? { progress: 'Installing', success: 'Installed', verb: 'install' }
@@ -576,10 +609,9 @@ function runLifecycleItem(
   spinner.start(`${words.progress} ${name}`)
   try {
     before?.()
-    runLifecycle(args)
+    await runLifecycle(args)
     spinner.clear()
-    if (action === 'update') prompts.log.info(`${words.success} ${name}`)
-    else prompts.log.success(`${words.success} ${name}`)
+    prompts.log.info(`${words.success} ${name}`)
     return true
   } catch (error) {
     spinner.clear()
@@ -682,23 +714,43 @@ async function installAtScope(
           let injectedSkills: string[] = []
           if (capable.length > 0) {
             prompts.note(instructionExplanation(selectedAgents, scope), 'About AI Instruction Files')
-            const selected = await chooseMany(
-              state,
-              `${prefix}.instructions`,
-              instructionQuestion(selectedAgents, scope),
-              capable.map((skill) => ({
-                value: skill,
-                label: displaySkillName(skill),
-                description: skillDescription(skill),
-              })),
-              { allowBack: true, required: false, initialValues: capable },
-            )
-            if (selected === BACK_SIGNAL) {
-              if (harnessWasPrompted) continue harnessStep
-              if (skillWasPrompted) continue skillStep
-              return BACK_SIGNAL
+            if (capable.length === 1) {
+              const skill = capable[0]
+              const selected = await chooseOne(
+                state,
+                `${prefix}.instructions.single`,
+                singleInstructionQuestion(skill, selectedAgents, scope),
+                [
+                  { value: 'inject', label: 'Inject' },
+                  { value: 'skip', label: 'Do not inject' },
+                ],
+                { allowBack: true, initialValue: 'inject' },
+              )
+              if (selected === BACK_SIGNAL) {
+                if (harnessWasPrompted) continue harnessStep
+                if (skillWasPrompted) continue skillStep
+                return BACK_SIGNAL
+              }
+              if (selected === 'inject') injectedSkills = [skill]
+            } else {
+              const selected = await chooseMany(
+                state,
+                `${prefix}.instructions`,
+                instructionQuestion(selectedAgents, scope),
+                capable.map((skill) => ({
+                  value: skill,
+                  label: displaySkillName(skill),
+                  description: skillDescription(skill),
+                })),
+                { allowBack: true, required: false, initialValues: capable },
+              )
+              if (selected === BACK_SIGNAL) {
+                if (harnessWasPrompted) continue harnessStep
+                if (skillWasPrompted) continue skillStep
+                return BACK_SIGNAL
+              }
+              injectedSkills = selected
             }
-            injectedSkills = selected
           }
 
           prompts.note(installSummary(scope, selectedSkills))
@@ -710,8 +762,25 @@ async function installAtScope(
             return BACK_SIGNAL
           }
 
+          const collisionMap = new Map<string, InstallCollision>()
           for (const skill of selectedSkills) {
-            const success = runLifecycleItem('install', skill, [
+            const pkg = packages.get(skill)
+            if (!pkg) continue
+            for (const collision of detectInstallCollisions(pkg, scope, selectedAgents)) {
+              collisionMap.set(normalizedPath(collision.path), collision)
+            }
+          }
+          const collisions = [...collisionMap.values()]
+          if (collisions.length > 0) {
+            prompts.note(collisionSummary(collisions), 'Collisions detected')
+            prompts.log.warn('See above. Installation has failed due to colliding directories/files. Would you like to continue with installation despite this collision?')
+            const destructiveProceed = await chooseConfirmation(state, `${prefix}.collision-confirm`, true)
+            if (destructiveProceed === BACK_SIGNAL) continue instructionStep
+            removeInstallCollisions(collisions)
+          }
+
+          for (const skill of selectedSkills) {
+            const success = await runLifecycleItem('install', skill, [
               skill,
               ...lifecycleArgs(scope, selectedAgents),
               injectedSkills.includes(skill) ? '--instructions' : '--no-instructions',
@@ -775,7 +844,7 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
         })
         .map((target) => target.agent)
       if (staleAgents.length === 0) continue
-      const success = runLifecycleItem('update', group.skill, [
+      const success = await runLifecycleItem('update', group.skill, [
         'update',
         group.skill,
         ...lifecycleArgs(scope, staleAgents),
@@ -841,7 +910,7 @@ async function uninstallAtScope(scope: Scope, state: WizardState, prefix: string
               for (const cleanup of cleanupGroup.cleanups) removeGeneratedCleanup(scope.root, cleanup)
             }
           : undefined
-        const success = runLifecycleItem(
+        const success = await runLifecycleItem(
           'uninstall',
           group.skill,
           ['uninstall', group.skill, '--scope', scopeArg(scope)],
@@ -939,14 +1008,11 @@ async function uninstallInstallerWizard(state: WizardState): Promise<NavResult<n
 
   const spinner = prompts.spinner({ withGuide: false })
   spinner.start('Uninstalling JLS')
-  let completion
   try {
-    completion = await prepareInstallerSelfUninstall(executable, installerDataRoot())
+    await prepareInstallerSelfUninstall(executable, installerDataRoot())
   } finally {
     spinner.clear()
   }
-
-  if (completion === 'complete') finishOperation('success')
   return 0
 }
 
