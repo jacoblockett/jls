@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { homedir, platform } from 'node:os'
-import { basename, join, normalize, resolve } from 'node:path'
+import { basename, dirname, join, normalize, resolve } from 'node:path'
 import { HARNESS_ADAPTERS, harnessAdapter } from './harnesses'
 import {
   generatedDataOwned,
@@ -198,7 +198,7 @@ export function detectInstallCollisions(
         : [],
     )
     for (const target of harnessResourceTargets(pkg.manifest, agent, scope)) {
-      const parent = resolve(target.destination, '..')
+      const parent = dirname(target.destination)
       if (existsSync(parent) && !statSync(parent).isDirectory()) add(parent)
       if (
         existsSync(target.destination)
