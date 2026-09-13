@@ -31,6 +31,8 @@ import {
   type SkillPackageManifest,
 } from './installer-updater'
 import { detectInstallCollisions } from './install-collision-override'
+import { containerAncestors, pruneEmptyContainers } from './container-pruning'
+import { displayManagedPath } from './display-path'
 import { removeLegacyOwnershipMarker } from './legacy-ownership'
 import { renderResource } from './resource-render'
 import { compiledTarget } from './targets'
@@ -451,7 +453,7 @@ function renderInstructionFragment(pkg: DownloadedSkillPackage, cli?: string): s
 function assertInstallCollisions(pkg: DownloadedSkillPackage, scope: Scope, targets: InstallTarget[]): void {
   const collisions = detectInstallCollisions(pkg, scope, targets.map((target) => target.agent))
   if (collisions.length === 0) return
-  const paths = collisions.map((collision) => collision.path).join(', ')
+  const paths = collisions.map((collision) => displayManagedPath(scope.root, collision.path)).join(', ')
   throw new Error(`installation collides with existing file/path: ${paths}`)
 }
 
@@ -511,7 +513,7 @@ function installTargets(
     else removeManagedBlock(paths.instruction, pkg.manifest.name)
 
     const verb = action === 'update' ? 'Updated' : 'Installed'
-    console.log(`${verb} ${pkg.manifest.name} ${pkg.manifest.version} for ${target.agent} at ${dest}`)
+    console.log(`${verb} ${pkg.manifest.name} ${pkg.manifest.version} for ${target.agent} at ${displayManagedPath(scope.root, dest)}`)
   }
 
   removeLegacyOwnershipMarkers(pkg.manifest, scope)
@@ -537,23 +539,44 @@ function uninstallGroup(group: InstallGroup): void {
   for (const target of group.targets) {
     const manifest = installedPackageManifest(target.skillPath)
     if (!manifest || manifest.name !== group.skill) {
-      throw new Error(`refusing to uninstall skill path without its matching manifest: ${target.skillPath}`)
+      throw new Error(`refusing to uninstall skill path without its matching manifest: ${displayManagedPath(group.scope.root, target.skillPath)}`)
     }
     if (manifest.runtime && !runtimeManifest) runtimeManifest = manifest
+    const paths = agentPaths(target.agent, group.scope)
+    const resourceContainers = harnessResourceTargets(manifest, target.agent, group.scope)
+      .map(({ destination }) => dirname(destination))
+    const skillContainers = manifest.skill_files.flatMap((rel) => (
+      containerAncestors(join(target.skillPath, rel), target.skillPath)
+    ))
+
     removeHarnessResources(manifest, target.agent, group.scope)
     removeSkillFiles(manifest, target.skillPath)
     removeManagedBlock(target.instructionPath, group.skill)
     removeLegacyOwnershipMarkers(manifest, group.scope)
-    console.log(`Uninstalled ${group.skill} for ${target.agent} from ${group.scope.root}`)
+    pruneEmptyContainers([
+      ...skillContainers,
+      target.skillPath,
+      paths.skillRoot,
+      ...resourceContainers,
+    ])
+    console.log(`Uninstalled ${group.skill} for ${target.agent} from ${displayManagedPath(group.scope.root, group.scope.root)}`)
   }
 
   if (!discoverInstallations(group.scope).some((candidate) => candidate.skill === group.skill)) {
     const manifest = runtimeManifest ?? cachedPackageManifest(group.skill)
     if (manifest) {
-      for (const path of runtimeFiles(manifest, group.scope)) removeFile(path)
+      const files = runtimeFiles(manifest, group.scope)
+      for (const path of files) removeFile(path)
       removeLegacyOwnershipMarkers(manifest, group.scope)
+      const runtimeRoot = runtimeSkillRoot(group.scope.root, manifest.name)
+      pruneEmptyContainers([
+        ...files.flatMap((path) => containerAncestors(path, runtimeRoot)),
+        runtimeRoot,
+        runtimeMetaRoot(group.scope.root),
+      ])
     }
     removeFile(cachedManifestPath(group.skill))
+    pruneEmptyContainers([skillMetadataRoot()])
   }
 }
 
