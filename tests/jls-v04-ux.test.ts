@@ -83,4 +83,12 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).toContain("else prompts.log.info('Done.')")
     expect(source).toContain('prompts.outro()')
   })
+
+  test('installer uninstall delegates to the verified cross-platform remover', () => {
+    expect(source).toContain("import { prepareInstallerSelfUninstall } from './self-uninstall'")
+    expect(source).toContain('completion = await prepareInstallerSelfUninstall(executable, installerDataRoot())')
+    expect(source).not.toContain('ping 127.0.0.1')
+    expect(source).not.toContain("'sleep 1;")
+    expect(source).not.toContain('scheduleInstallerUninstall(')
+  })
 })
