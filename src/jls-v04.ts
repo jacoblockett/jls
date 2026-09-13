@@ -12,11 +12,11 @@ import {
   compareVersions,
   fetchStableReleaseManifest,
   parseSkillPackageManifest,
-  scheduleInstallerReplacement,
   stageInstallerUpdate,
   type ReleaseManifest,
   type SkillPackageManifest,
 } from './installer-updater'
+import { prepareInstallerReplacement } from './installer-replacement'
 import {
   detectGeneratedCleanup,
   removeGeneratedCleanup,
@@ -427,9 +427,15 @@ function dimBullet(text: string, indent = ''): string {
   return styleText('dim', `${indent}• ${text}`)
 }
 
+function scopeDescription(scope: Scope): string {
+  if (scope.origin === 'current') return 'your current path'
+  if (scope.origin === 'global') return 'your global path'
+  return 'your custom path'
+}
+
 function installSummary(scope: Scope, skills: string[]): string {
   return [
-    'The following skills will be installed:',
+    `JLS Installer will install the following skills on ${scopeDescription(scope)}:`,
     '',
     scope.root,
     '',
@@ -480,7 +486,7 @@ function updateAvailable(group: InstallGroup, available: Record<string, string>)
     try {
       return compareVersions(installed, version) < 0
     } catch {
-      return installed !== version
+      return false
     }
   })
 }
@@ -488,7 +494,14 @@ function updateAvailable(group: InstallGroup, available: Record<string, string>)
 function updateStatus(group: InstallGroup, available: Record<string, string>): string {
   const version = available[group.skill]
   if (!version) throw new Error(`stable release does not contain ${group.skill}`)
-  return `${installedVersions(group).join(' / ')} -> ${version}`
+  const stale = installedVersions(group).filter((installed) => {
+    try {
+      return compareVersions(installed, version) < 0
+    } catch {
+      return false
+    }
+  })
+  return `${stale.join(' / ')} -> ${version}`
 }
 
 function rawManifest(path: string): RawSkillManifest | undefined {
@@ -562,7 +575,8 @@ function runLifecycleItem(
     before?.()
     runLifecycle(args)
     spinner.clear()
-    prompts.log.success(`${words.success} ${name}`)
+    if (action === 'update') prompts.log.info(`${words.success} ${name}`)
+    else prompts.log.success(`${words.success} ${name}`)
     return true
   } catch (error) {
     spinner.clear()
@@ -575,6 +589,7 @@ function runLifecycleItem(
 function finishOperation(level: 'success' | 'info'): void {
   if (level === 'success') prompts.log.success('Done.')
   else prompts.log.info('Done.')
+  prompts.outro('')
 }
 
 async function installAtScope(
@@ -633,7 +648,7 @@ async function installAtScope(
         const selected = await chooseMany(
           state,
           `${prefix}.harnesses`,
-          "For which of the following AI harnesses would you like to install your selected skills? If you don't see your desired harness here, it is either undetected or unsupported.",
+          'The following supported AI harnesses were detected. You can opt out of any of these if you like.',
           harnessItems,
           { allowBack: true, initialValues: enabledHarnesses },
         )
@@ -736,10 +751,22 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
     if (proceed === BACK_SIGNAL) continue selectionStep
 
     for (const group of groups) {
+      const version = availableVersions[group.skill]
+      if (!version) continue
+      const staleAgents = group.targets
+        .filter((target) => {
+          try {
+            return compareVersions(target.version, version) < 0
+          } catch {
+            return false
+          }
+        })
+        .map((target) => target.agent)
+      if (staleAgents.length === 0) continue
       const success = runLifecycleItem('update', group.skill, [
         'update',
         group.skill,
-        ...lifecycleArgs(scope, group.targets.map((target) => target.agent)),
+        ...lifecycleArgs(scope, staleAgents),
       ])
       if (!success) return 1
     }
@@ -882,7 +909,7 @@ async function updateInstallerWizard(state: WizardState): Promise<NavResult<numb
   const proceed = await chooseConfirmation(state, 'installer-update.confirm')
   if (proceed === BACK_SIGNAL) return BACK_SIGNAL
   const staged = await stageInstallerUpdate(executable, update)
-  scheduleInstallerReplacement(staged, executable)
+  await prepareInstallerReplacement(staged, executable)
   return 0
 }
 
