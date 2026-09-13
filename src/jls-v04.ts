@@ -475,8 +475,6 @@ function summaryPath(scope: Scope): string {
 
 function installSummary(scope: Scope, skills: string[]): string {
   return [
-    'The following skills will be installed:',
-    '',
     summaryPath(scope),
     '',
     ...skills.map((skill) => noteBullet(displaySkillName(skill))),
@@ -485,8 +483,6 @@ function installSummary(scope: Scope, skills: string[]): string {
 
 function updateSummary(scope: Scope, groups: InstallGroup[], available: Record<string, string>): string {
   return [
-    'The following skills will be updated:',
-    '',
     summaryPath(scope),
     '',
     ...groups.map((group) => noteBullet(`${displaySkillName(group.skill)} (${updateStatus(group, available)})`)),
@@ -498,14 +494,16 @@ function uninstallSummary(
   groups: InstallGroup[],
   removeData: Set<string>,
 ): string {
+  const showGeneratedDetail = removeData.size > 0
   return [
-    'The following skills will be uninstalled:',
-    '',
     summaryPath(scope),
     '',
-    ...groups.map((group) => noteBullet(
-      `${displaySkillName(group.skill)} (${removeData.has(group.skill) ? 'installed files, generated data' : 'installed files'})`,
-    )),
+    ...groups.map((group) => {
+      const name = displaySkillName(group.skill)
+      if (!showGeneratedDetail) return noteBullet(name)
+      const detail = removeData.has(group.skill) ? 'installed files, generated data' : 'installed files'
+      return noteBullet(`${name} (${detail})`)
+    }),
   ].join('\n')
 }
 
@@ -788,7 +786,7 @@ async function installAtScope(
             }
           }
 
-          prompts.note(installSummary(scope, selectedSkills))
+          prompts.note(installSummary(scope, selectedSkills), 'The following skills will be installed:')
           const proceed = await chooseConfirmation(state, `${prefix}.confirm`)
           if (proceed === BACK_SIGNAL) {
             if (capable.length > 0) continue instructionStep
@@ -868,7 +866,7 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
 
   if (available.length === 1) {
     const group = available[0]
-    prompts.note(updateSummary(scope, [group], availableVersions))
+    prompts.note(updateSummary(scope, [group], availableVersions), 'The following skills will be updated:')
     const proceed = await chooseYesNo(
       state,
       `${prefix}.single-confirm`,
@@ -894,7 +892,7 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
     if (selected === BACK_SIGNAL) return BACK_SIGNAL
     const groups = available.filter((group) => selected.includes(group.skill))
 
-    prompts.note(updateSummary(scope, groups, availableVersions))
+    prompts.note(updateSummary(scope, groups, availableVersions), 'The following skills will be updated:')
     const proceed = await chooseConfirmation(state, `${prefix}.confirm`)
     if (proceed === BACK_SIGNAL) continue selectionStep
     return applyUpdates(groups)
@@ -967,7 +965,7 @@ async function uninstallAtScope(scope: Scope, state: WizardState, prefix: string
         removeData = new Set(dataSelection)
       }
 
-      prompts.note(uninstallSummary(scope, groups, removeData))
+      prompts.note(uninstallSummary(scope, groups, removeData), 'The following skills will be uninstalled:')
       const proceed = await chooseConfirmation(state, `${prefix}.confirm`, true)
       if (proceed === BACK_SIGNAL) {
         if (cleanupGroups.length > 0) continue cleanupStep
