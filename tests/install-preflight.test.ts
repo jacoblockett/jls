@@ -186,9 +186,15 @@ describe('0.4 interactive flow contract', () => {
   })
 
   test('generated-data choice is integrated into skill uninstall', () => {
-    expect(source).toContain("'The following skills you selected have data generated beyond its installation. If you would like to retain any of this data, deselect the options below before continuing.'")
+    expect(source).toContain('if (cleanupGroups.length === 1) {')
+    expect(source).toContain('The ${displaySkillName(cleanupGroup.skill)} skill has generated data separate from any skill or agent files that were installed. Would you like to also remove this data?')
+    expect(source).toContain("{ allowBack: true, initialValue: 'yes' }")
+    expect(source).toContain('else if (cleanupGroups.length > 1) {')
+    expect(source).toContain("'The following skills have generated data separate from any skill or agent files that were installed. Select which, if any, of this data you would also like to remove.'")
+    expect(source).toContain('label: displaySkillName(group.skill)')
     expect(source).toContain('initialValues: cleanupGroups.map((group) => group.skill)')
     expect(source).not.toContain('Remove skill-generated data')
+    expect(source).not.toContain('The following skills you selected have data generated beyond its installation.')
   })
 
   test('installer manifest remains the runtime version authority', () => {
