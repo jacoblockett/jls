@@ -13,11 +13,16 @@ $executable = $env:JLS_UNINSTALL_EXECUTABLE
 $dataRoot = $env:JLS_UNINSTALL_DATA_ROOT
 $readyFile = $env:JLS_UNINSTALL_READY_FILE
 $errorFile = $env:JLS_UNINSTALL_ERROR_FILE
+$finalizerFile = $env:JLS_UNINSTALL_FINALIZER_FILE
 $ready = $false
 $failNode = [char]0x2716
 $guide = [char]0x2502
 $finalBranch = [char]0x2514
 $successNode = [char]0x25C6
+
+function Remove-FinalizerFile {
+  try { Remove-Item -LiteralPath $finalizerFile -Force -ErrorAction SilentlyContinue } catch {}
+}
 
 function Save-Failure([string]$message) {
   try {
@@ -62,12 +67,14 @@ try {
   }
 
   try { Remove-Item -LiteralPath $errorFile -Force -ErrorAction SilentlyContinue } catch {}
+  Remove-FinalizerFile
   [Console]::Out.WriteLine($successNode.ToString() + '  Done.')
   exit 0
 } catch {
   $message = $_.Exception.Message
   Save-Failure $message
   try { Remove-Item -LiteralPath $readyFile -Force -ErrorAction SilentlyContinue } catch {}
+  Remove-FinalizerFile
   exit 1
 }
 `
@@ -147,29 +154,28 @@ export function windowsFinalizerScript(): string {
   return WINDOWS_FINALIZER
 }
 
-export function encodeWindowsFinalizer(script = WINDOWS_FINALIZER): string {
-  return Buffer.from(script, 'utf16le').toString('base64')
-}
-
 export async function armWindowsSelfUninstall(executable: string, dataRoot: string): Promise<void> {
   assertExecutable(executable)
   const token = `${process.pid}-${randomUUID()}`
   const readyFile = join(tmpdir(), `jls-uninstall-${token}.ready`)
   const errorFile = join(tmpdir(), `jls-uninstall-${token}.error`)
+  const finalizerFile = join(tmpdir(), `jls-uninstall-${token}.ps1`)
 
   rmSync(readyFile, { force: true })
   rmSync(errorFile, { force: true })
+  rmSync(finalizerFile, { force: true })
+  writeFileSync(finalizerFile, WINDOWS_FINALIZER, 'utf8')
 
-  // -EncodedCommand avoids the Windows command-line quoting layer entirely. PowerShell
-  // requires this payload to be UTF-16LE before base64 encoding.
+  // Use -File rather than transporting the finalizer source through the Windows command line.
+  // The child signals READY only after it has opened the exact parent process and can wait on it.
   const child = spawn('powershell.exe', [
     '-NoLogo',
     '-NoProfile',
     '-NonInteractive',
     '-ExecutionPolicy',
     'Bypass',
-    '-EncodedCommand',
-    encodeWindowsFinalizer(),
+    '-File',
+    finalizerFile,
   ], {
     detached: true,
     stdio: ['ignore', 'inherit', 'inherit'],
@@ -181,6 +187,7 @@ export async function armWindowsSelfUninstall(executable: string, dataRoot: stri
       JLS_UNINSTALL_DATA_ROOT: dataRoot,
       JLS_UNINSTALL_READY_FILE: readyFile,
       JLS_UNINSTALL_ERROR_FILE: errorFile,
+      JLS_UNINSTALL_FINALIZER_FILE: finalizerFile,
     },
   })
 
@@ -193,6 +200,7 @@ export async function armWindowsSelfUninstall(executable: string, dataRoot: stri
     } catch {}
     rmSync(readyFile, { force: true })
     rmSync(errorFile, { force: true })
+    rmSync(finalizerFile, { force: true })
     throw new Error(detail || (error instanceof Error ? error.message : String(error)))
   }
 
