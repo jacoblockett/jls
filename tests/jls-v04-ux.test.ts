@@ -96,11 +96,12 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).toContain("disabledSuffix: installedEverywhere ? ' (already installed)' : undefined")
   })
 
-  test('all structured summaries normalize and dim paths while dimming only bullet glyphs', () => {
+  test('all structured summaries normalize and dim paths without italicizing them, while dimming only bullet glyphs', () => {
     expect(source).toContain("'The following skills will be installed:'")
     expect(source).toContain("'The following skills will be updated:'")
     expect(source).toContain("'The following skills will be uninstalled:'")
-    expect(source).toContain("return styleText(['italic', 'dim'], normalizedPath(scope.root))")
+    expect(source).toContain("return styleText('dim', normalizedPath(scope.root))")
+    expect(source).not.toContain("styleText(['italic', 'dim'], normalizedPath(scope.root))")
     expect(source).toContain("return `${indent}${styleText('dim', '•')} ${text}`")
     expect(source).not.toContain("styleText('dim', `${indent}• ${text}`)")
     expect(source).not.toContain('JLS Installer will install')
@@ -113,10 +114,13 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).toContain("Generated data: ${removeData.has(group.skill) ? 'Remove' : 'Keep'}")
   })
 
-  test('collisions are disclosed and require an explicit destructive confirmation', () => {
+  test('collisions are disclosed and warning wrapping leaves continuation guides to Clack', () => {
     expect(source).toContain("prompts.note(collisionSummary(collisions), 'Collisions detected')")
     expect(source).toContain('The following directories/files would be occupied/overwritten should installation continue. Installation in this case would be destructive and could cause permanent loss of data.')
-    expect(source).toContain("prompts.log.warn('See above. Installation has failed due to colliding directories/files. Would you like to continue with installation despite this collision?')")
+    expect(source).toContain("prompts.log.warn(wrapLogMessage('See above. Installation has failed due to colliding directories/files. Would you like to continue with installation despite this collision?'))")
+    expect(source).toContain('const width = columns - 3')
+    expect(source).toContain("return lines.join('\\n')")
+    expect(source).not.toContain("styleText('gray', '│')")
     expect(source).toContain('const destructiveProceed = await chooseConfirmation(state, `${prefix}.collision-confirm`, true)')
     expect(source).toContain('removeInstallCollisions(collisions)')
   })
