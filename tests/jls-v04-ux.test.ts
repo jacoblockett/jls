@@ -53,22 +53,27 @@ describe('0.4 installer wording and rendering contract', () => {
   test('harness picker uses the approved wording verbatim and defaults all feasible harnesses on', () => {
     expect(source).toContain("For which of the following AI harnesses would you like to install your selected skills? If you don't see your desired harness here, it is either undetected or unsupported.")
     expect(source).toContain('initialValues: enabledHarnesses')
+    expect(source).toContain('const harnessWasPrompted = enabledHarnesses.length > 1')
+    expect(source).toContain('selectedAgents = enabledHarnesses')
     expect(source).not.toContain('The following supported AI harnesses were detected. You can opt out of any of these if you like.')
   })
 
-  test('single feasible required choices and empty scopes skip redundant screens', () => {
-    expect(source).toContain('if (enabled.length === 1) {')
-    expect(source).toContain('if (required && selectable.length === 1) {')
-    expect(source).toContain('const harnessWasPrompted = enabledHarnesses.length > 1')
-    expect(source).toContain('selectedAgents = enabledHarnesses')
+  test('skill selection never inherits the one-feasible-choice shortcut', () => {
+    expect(source).not.toContain('if (required && selectable.length === 1) {')
     expect(source).toContain("noSkillsDetected ? 'No skills detected. Which skills would you like to install?' : 'Which skills would you like to install?'")
+    expect(source).toContain("'The following updates are available. Please select which you would like to install.'")
+    expect(source).toContain("'Which skills would you like to uninstall?'")
+    expect(source).toContain('const skillWasPrompted = true')
+    expect(source).toContain('const selectionWasPrompted = true')
+    expect(source).toContain("disabledSuffix: installedEverywhere ? ' (already installed)' : undefined")
+  })
+
+  test('empty scopes still skip only the redundant action screen', () => {
     expect(source).toContain('if (!hasInstalled) {')
     expect(source).toContain('const result = await installAtScope(scope, state, `${prefix}.install`, true)')
   })
 
   test('navigation backs through visible steps and records Go back as the history hint', () => {
-    expect(source).toContain('const skillWasPrompted = selectableSkills.length > 1')
-    expect(source).toContain('const selectionWasPrompted = available.length > 1')
     expect(source).toContain('if (skillWasPrompted) continue skillStep')
     expect(source).toContain('if (selectionWasPrompted) continue selectionStep')
     expect(navigation).toContain("styleText('dim', 'Go back')")
