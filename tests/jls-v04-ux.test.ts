@@ -143,7 +143,7 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).toContain('validate: validateCustomPath')
   })
 
-  test('structured paths are localized to the selected management root while the selected root remains intact', () => {
+  test('structured paths are localized to the selected management root', () => {
     expect(source).toContain("import { displayManagedPath } from './display-path'")
     expect(source).toContain("return styleText('dim', displayManagedPath(scope.root, scope.root))")
     expect(source).toContain('displayManagedPath(scope.root, collision.path)')
@@ -152,11 +152,20 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).not.toContain('JLS Installer will install')
   })
 
-  test('uninstall summary is a flat per-skill installed-files/generated-data description', () => {
-    expect(source).toContain("`${displaySkillName(group.skill)} (${removeData.has(group.skill) ? 'installed files, generated data' : 'installed files'})`")
+  test('lifecycle summaries use their action sentence as the note title', () => {
+    expect(source).toContain("prompts.note(installSummary(scope, selectedSkills), 'The following skills will be installed:')")
+    expect(source).toContain("prompts.note(updateSummary(scope, [group], availableVersions), 'The following skills will be updated:')")
+    expect(source).toContain("prompts.note(updateSummary(scope, groups, availableVersions), 'The following skills will be updated:')")
+    expect(source).toContain("prompts.note(uninstallSummary(scope, groups, removeData), 'The following skills will be uninstalled:')")
+  })
+
+  test('uninstall summary adds file-type detail only when generated data will be removed', () => {
+    expect(source).toContain('const showGeneratedDetail = removeData.size > 0')
+    expect(source).toContain('if (!showGeneratedDetail) return noteBullet(name)')
+    expect(source).toContain("const detail = removeData.has(group.skill) ? 'installed files, generated data' : 'installed files'")
+    expect(source).toContain('return noteBullet(`${name} (${detail})`)')
     expect(source).not.toContain('Skill/agent files: Remove')
     expect(source).not.toContain('Generated data: ${removeData.has(group.skill)')
-    expect(source).not.toContain('const showGeneratedDetail = removeData.size > 0')
   })
 
   test('collisions are file-granular, scope-localized, and warning wrapping leaves continuation guides to Clack', () => {
