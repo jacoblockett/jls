@@ -36,16 +36,23 @@ describe('cross-platform installer self-uninstall', () => {
     expect(source.toLowerCase()).not.toContain('ping ')
   })
 
-  test('Windows finalizer is transported through a temporary PowerShell file without detached spawn', () => {
+  test('Windows finalizer escapes the Bun job through the cmd START breakaway trampoline', () => {
     const implementation = readFileSync(new URL('../src/self-uninstall.ts', import.meta.url), 'utf8')
+    expect(implementation).toContain("spawn('cmd.exe', [")
+    expect(implementation).toContain("'/c',")
+    expect(implementation).toContain("'start',")
+    expect(implementation).toContain("'/b',")
+    expect(implementation).toContain("'powershell.exe',")
     expect(implementation).toContain("'-File',")
     expect(implementation).toContain('JLS_UNINSTALL_FINALIZER_FILE: finalizerFile')
     expect(implementation).toContain("writeFileSync(finalizerFile, WINDOWS_FINALIZER, 'utf8')")
+    expect(implementation).toContain('await waitForBootstrap(bootstrap)')
+    expect(implementation).toContain('await waitForReadySignal(readyFile, errorFile)')
     expect(implementation).not.toContain("'-EncodedCommand'")
     expect(implementation).not.toContain('detached: true')
   })
 
-  test('Windows finalizer reaches READY and completes after its parent exits', async () => {
+  test('Windows finalizer reaches READY, survives its Bun parent, and completes cleanup', async () => {
     if (process.platform !== 'win32') return
 
     const root = mkdtempSync(join(tmpdir(), 'jls-self-uninstall-win-'))
@@ -82,6 +89,15 @@ describe('cross-platform installer self-uninstall', () => {
       const deadline = Date.now() + 5000
       while ((existsSync(executable) || existsSync(dataRoot)) && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+      if (existsSync(executable) || existsSync(dataRoot)) {
+        throw new Error([
+          'Windows self-uninstall finalizer did not complete after its Bun parent exited',
+          `executableExists=${String(existsSync(executable))}`,
+          `dataRootExists=${String(existsSync(dataRoot))}`,
+          `stdout:\n${stdout}`,
+          `stderr:\n${stderr}`,
+        ].join('\n'))
       }
       expect(existsSync(executable)).toBe(false)
       expect(existsSync(dataRoot)).toBe(false)
