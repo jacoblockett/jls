@@ -4,69 +4,82 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pruneEmptyContainers } from '../src/container-pruning'
 
-describe('empty container pruning', () => {
-  test('prunes known empty containers leaf-to-root', () => {
+describe('uninstall ownership boundaries', () => {
+  test('removes an owned runtime subtree and then its empty JLS root', () => {
     const root = mkdtempSync(join(tmpdir(), 'jls-prune-'))
     try {
-      const bin = join(root, '.jls', 'map', 'bin')
+      const runtime = join(root, '.jls', 'map')
+      const bin = join(runtime, 'bin')
       mkdirSync(bin, { recursive: true })
-      pruneEmptyContainers([join(root, '.jls'), join(root, '.jls', 'map'), bin])
+      writeFileSync(join(bin, 'leftover.txt'), 'owned')
+      pruneEmptyContainers([join(root, '.jls'), runtime, bin])
       expect(existsSync(join(root, '.jls'))).toBe(false)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
   })
 
-  test('prunes an empty hidden harness shell after its known leaf container is removed', () => {
+  test('removes the owned skill subtree without pruning shared .agents containers', () => {
     const root = mkdtempSync(join(tmpdir(), 'jls-prune-'))
     try {
-      const skills = join(root, '.agents', 'skills')
-      mkdirSync(skills, { recursive: true })
-      pruneEmptyContainers([skills])
-      expect(existsSync(skills)).toBe(false)
-      expect(existsSync(join(root, '.agents'))).toBe(false)
-      expect(existsSync(root)).toBe(true)
+      const skillRoot = join(root, '.agents', 'skills')
+      const skill = join(skillRoot, 'map')
+      mkdirSync(skill, { recursive: true })
+      writeFileSync(join(skill, 'leftover.txt'), 'owned')
+      pruneEmptyContainers([skillRoot, skill])
+      expect(existsSync(skill)).toBe(false)
+      expect(existsSync(skillRoot)).toBe(true)
+      expect(existsSync(join(root, '.agents'))).toBe(true)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
   })
 
-  test('preserves non-empty containers and their ancestors', () => {
+  test('never prunes harness-owned resource directories', () => {
     const root = mkdtempSync(join(tmpdir(), 'jls-prune-'))
     try {
-      const bin = join(root, '.jls', 'map', 'bin')
-      mkdirSync(bin, { recursive: true })
-      writeFileSync(join(bin, 'keep.txt'), 'keep')
-      pruneEmptyContainers([join(root, '.jls'), join(root, '.jls', 'map'), bin])
-      expect(existsSync(join(bin, 'keep.txt'))).toBe(true)
+      const codexAgents = join(root, '.codex', 'agents')
+      const claudeAgents = join(root, '.claude', 'agents')
+      mkdirSync(codexAgents, { recursive: true })
+      mkdirSync(claudeAgents, { recursive: true })
+      pruneEmptyContainers([codexAgents, claudeAgents])
+      expect(existsSync(codexAgents)).toBe(true)
+      expect(existsSync(join(root, '.codex'))).toBe(true)
+      expect(existsSync(claudeAgents)).toBe(true)
+      expect(existsSync(join(root, '.claude'))).toBe(true)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps the JLS root while another runtime remains', () => {
+    const root = mkdtempSync(join(tmpdir(), 'jls-prune-'))
+    try {
+      const map = join(root, '.jls', 'map')
+      const tasks = join(root, '.jls', 'tasks')
+      mkdirSync(map, { recursive: true })
+      mkdirSync(tasks, { recursive: true })
+      writeFileSync(join(map, 'leftover.txt'), 'owned')
+      writeFileSync(join(tasks, 'keep.txt'), 'keep')
+      pruneEmptyContainers([join(root, '.jls'), map])
+      expect(existsSync(map)).toBe(false)
+      expect(existsSync(join(tasks, 'keep.txt'))).toBe(true)
       expect(existsSync(join(root, '.jls'))).toBe(true)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
   })
 
-  test('preserves a hidden harness shell containing unrelated content', () => {
-    const root = mkdtempSync(join(tmpdir(), 'jls-prune-'))
-    try {
-      const skills = join(root, '.agents', 'skills')
-      mkdirSync(skills, { recursive: true })
-      writeFileSync(join(root, '.agents', 'keep.txt'), 'keep')
-      pruneEmptyContainers([skills])
-      expect(existsSync(skills)).toBe(false)
-      expect(existsSync(join(root, '.agents', 'keep.txt'))).toBe(true)
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  test('never follows or removes symlink containers', () => {
+  test('never follows or removes a symlink used as an owned-subtree path', () => {
     if (process.platform === 'win32') return
     const root = mkdtempSync(join(tmpdir(), 'jls-prune-'))
     const outside = mkdtempSync(join(tmpdir(), 'jls-prune-outside-'))
     try {
-      const link = join(root, '.jls')
+      const skillRoot = join(root, '.agents', 'skills')
+      mkdirSync(skillRoot, { recursive: true })
+      const link = join(skillRoot, 'map')
       symlinkSync(outside, link)
-      pruneEmptyContainers([link])
+      pruneEmptyContainers([skillRoot, link])
       expect(existsSync(link)).toBe(true)
       expect(existsSync(outside)).toBe(true)
     } finally {
