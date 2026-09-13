@@ -10,6 +10,10 @@ import {
   runtimeRootOwned,
   runtimeSkillOwned,
 } from '../src/install-ownership'
+import {
+  detectInstallCollisions,
+  removeInstallCollisions,
+} from '../src/install-collision-override'
 
 describe('installation ownership contract', () => {
   test('a pre-existing unowned .jls directory is a collision', () => {
@@ -17,6 +21,37 @@ describe('installation ownership contract', () => {
     try {
       mkdirSync(join(root, '.jls'))
       expect(() => assertRuntimeLayoutAvailable(root, 'map')).toThrow('not owned by JLS')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('an explicit destructive override can clear the exact empty .jls collision', () => {
+    const root = mkdtempSync(join(tmpdir(), 'jls-owner-'))
+    try {
+      const collisionPath = join(root, '.jls')
+      mkdirSync(collisionPath)
+      const pkg = {
+        manifest: {
+          format: 1,
+          name: 'map',
+          version: '0.4.0',
+          min_installer: '0.1.0',
+          description: 'test',
+          skill_files: ['SKILL.md'],
+          runtime: 'rust',
+        },
+        root: '',
+        cleanup() {},
+      } as any
+      const scope = { kind: 'project', origin: 'custom', identity: root, root } as const
+
+      const collisions = detectInstallCollisions(pkg, scope, [])
+      expect(collisions.map((collision) => collision.path)).toEqual([collisionPath])
+      expect(existsSync(collisionPath)).toBe(true)
+
+      removeInstallCollisions(collisions)
+      expect(existsSync(collisionPath)).toBe(false)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
