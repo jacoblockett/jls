@@ -36,12 +36,13 @@ describe('cross-platform installer self-uninstall', () => {
     expect(source.toLowerCase()).not.toContain('ping ')
   })
 
-  test('Windows finalizer is transported through a temporary PowerShell file', () => {
+  test('Windows finalizer is transported through a temporary PowerShell file without detached spawn', () => {
     const implementation = readFileSync(new URL('../src/self-uninstall.ts', import.meta.url), 'utf8')
     expect(implementation).toContain("'-File',")
     expect(implementation).toContain('JLS_UNINSTALL_FINALIZER_FILE: finalizerFile')
     expect(implementation).toContain("writeFileSync(finalizerFile, WINDOWS_FINALIZER, 'utf8')")
     expect(implementation).not.toContain("'-EncodedCommand'")
+    expect(implementation).not.toContain('detached: true')
   })
 
   test('Windows finalizer reaches READY and completes after its parent exits', async () => {
