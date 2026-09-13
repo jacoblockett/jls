@@ -35,13 +35,15 @@ describe('cross-platform installer self-uninstall', () => {
     expect(source.toLowerCase()).not.toContain('ping ')
   })
 
-  test('Windows finalizer verifies deletion and leaves diagnostics on failure', () => {
+  test('Windows finalizer verifies deletion, renders safely, and leaves diagnostics on failure', () => {
     const source = windowsFinalizerScript()
     expect(source).toContain('Test-Path -LiteralPath $executable')
     expect(source).toContain('Test-Path -LiteralPath $dataRoot')
     expect(source).toContain("Join-Path $dataRoot 'uninstall-error.json'")
     expect(source).toContain('JLS could not be fully uninstalled.')
-    expect(source).toContain("[Console]::Out.WriteLine('◇  Done.')")
-    expect(source).toContain("[Console]::Out.WriteLine('└')")
+    expect(source).toContain('$successNode = [char]0x25C7')
+    expect(source).toContain('$finalBranch = [char]0x2514')
+    expect(source).toContain("[Console]::Out.WriteLine($successNode.ToString() + '  Done.')")
+    expect(source).toContain('[Console]::Out.WriteLine($finalBranch.ToString())')
   })
 })
