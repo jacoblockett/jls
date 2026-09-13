@@ -6,30 +6,34 @@ const OWNERSHIP_MARKER = '.jls-owned.json'
 type OwnershipMarker = {
   format: 1
   owner: 'jls'
-  kind: 'runtime-root' | 'skill-runtime'
+  kind: 'runtime-root' | 'skill-runtime' | 'generated-data'
   skill?: string
 }
 
 type GeneratedDataSpec = {
   path: string
   marker?: string
+  ownership_marker?: string
 }
 
 function markerPath(root: string): string {
   return join(root, OWNERSHIP_MARKER)
 }
 
-function readMarker(root: string): OwnershipMarker | undefined {
-  const path = markerPath(root)
+function parseMarker(path: string): OwnershipMarker | undefined {
   if (!existsSync(path) || !statSync(path).isFile()) return undefined
   try {
     const value = JSON.parse(readFileSync(path, 'utf8')) as OwnershipMarker
     if (value?.format !== 1 || value.owner !== 'jls') return undefined
-    if (value.kind !== 'runtime-root' && value.kind !== 'skill-runtime') return undefined
+    if (!['runtime-root', 'skill-runtime', 'generated-data'].includes(value.kind)) return undefined
     return value
   } catch {
     return undefined
   }
+}
+
+function readMarker(root: string): OwnershipMarker | undefined {
+  return parseMarker(markerPath(root))
 }
 
 function writeMarker(root: string, marker: OwnershipMarker): void {
@@ -55,6 +59,11 @@ export function runtimeRootOwned(scopeRoot: string): boolean {
 export function runtimeSkillOwned(scopeRoot: string, skill: string): boolean {
   const marker = readMarker(runtimeSkillRoot(scopeRoot, skill))
   return marker?.kind === 'skill-runtime' && marker.skill === skill
+}
+
+export function generatedDataOwned(target: string, skill: string, ownershipMarker: string): boolean {
+  const marker = parseMarker(join(target, ownershipMarker))
+  return marker?.kind === 'generated-data' && marker.skill === skill
 }
 
 export function assertRuntimeLayoutAvailable(
@@ -124,6 +133,12 @@ export function assertGeneratedDataOwnership(
     if (!existsSync(target)) continue
     if (!statSync(target).isDirectory()) {
       throw new Error(`${skill} generated-data path collides with an existing non-directory: ${target}`)
+    }
+    if (spec.ownership_marker) {
+      if (!generatedDataOwned(target, skill, spec.ownership_marker)) {
+        throw new Error(`${skill} generated-data path already exists but does not carry its JLS ownership contract: ${target}`)
+      }
+      continue
     }
     if (!spec.marker) {
       throw new Error(`${skill} generated-data path already exists without an ownership marker contract: ${target}`)
