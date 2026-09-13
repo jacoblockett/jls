@@ -45,9 +45,24 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).toContain('AI tools can use instruction files to receive extra directions about how they should work in a project.')
   })
 
-  test('harness picker is opt-out and defaults all available harnesses on', () => {
-    expect(source).toContain('The following supported AI harnesses were detected. You can opt out of any of these if you like.')
+  test('harness picker uses the approved wording and defaults all feasible harnesses on', () => {
+    expect(source).toContain("For which of the following AI harnesses would you like to install your selected skills? If you don't see your desired harness here, it is either undetected or unsupported.")
     expect(source).toContain('initialValues: enabledHarnesses')
+    expect(source).not.toContain('You can opt out of any of these if you like.')
+  })
+
+  test('single feasible choices and empty scopes skip redundant screens', () => {
+    expect(source).toContain('if (enabled.length === 1) {')
+    expect(source).toContain('const harnessWasPrompted = enabledHarnesses.length > 1')
+    expect(source).toContain('selectedAgents = enabledHarnesses')
+    expect(source).toContain("noSkillsDetected ? 'No skills detected. Which skills would you like to install?' : 'Which skills would you like to install?'")
+    expect(source).toContain('if (!hasInstalled) {')
+    expect(source).toContain('const result = await installAtScope(scope, state, `${prefix}.install`, true)')
+  })
+
+  test('zero detected harnesses stop installation explicitly', () => {
+    expect(source).toContain('if (detected.length === 0) {')
+    expect(source).toContain("prompts.log.warn('No supported AI harnesses were detected.')")
   })
 
   test('No and Backspace share the same confirmation result', () => {
@@ -64,9 +79,15 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).toContain("disabledSuffix: installedEverywhere ? ' (already installed)' : undefined")
   })
 
-  test('summaries use bullet glyphs and flatten plain uninstalls', () => {
-    expect(source).toContain('`• ${displaySkillName(skill)}`')
-    expect(source).toContain("lines.push('  • Skill/agent files: Remove')")
+  test('summaries show the concrete path, dim bullets, and avoid self-reference', () => {
+    expect(source).toContain("'The following skills will be installed:'")
+    expect(source).toContain("'The following skills will be updated:'")
+    expect(source).toContain("'The following skills will be uninstalled:'")
+    expect(source).toContain('scope.root')
+    expect(source).toContain("return styleText('dim', `${indent}• ${text}`)")
+    expect(source).not.toContain('JLS Installer will install')
+    expect(source).not.toContain('JLS Installer will update')
+    expect(source).not.toContain('JLS Installer will uninstall')
     expect(source).toContain('const showGeneratedDetail = removeData.size > 0')
     expect(source).toContain('if (!showGeneratedDetail || !cleanupSkills.has(group.skill)) continue')
   })
@@ -75,13 +96,13 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source.match(/prompts\.log\.info\('No updates were found\.'\)/g)?.length).toBe(2)
   })
 
-  test('interactive lifecycle work is quiet, spinner-backed, and ends with structured status', () => {
+  test('interactive lifecycle work is quiet, spinner-backed, and does not append an empty outro', () => {
     expect(source).toContain("stdio: ['ignore', 'pipe', 'pipe']")
     expect(source).toContain('spinner.start(`${words.progress} ${name}`)')
     expect(source).toContain('prompts.log.success(`${words.success} ${name}`)')
     expect(source).toContain("if (level === 'success') prompts.log.success('Done.')")
     expect(source).toContain("else prompts.log.info('Done.')")
-    expect(source).toContain('prompts.outro()')
+    expect(source).not.toContain('prompts.outro()')
   })
 
   test('installer uninstall delegates to the verified cross-platform remover', () => {
