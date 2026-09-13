@@ -66,14 +66,20 @@ describe('cross-platform installer self-uninstall', () => {
 
     try {
       const child = spawn(process.execPath, [helper, executable, dataRoot], {
-        stdio: 'ignore',
+        stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       })
+      let stdout = ''
+      let stderr = ''
+      child.stdout?.on('data', (chunk) => { stdout += String(chunk) })
+      child.stderr?.on('data', (chunk) => { stderr += String(chunk) })
       const exitCode = await new Promise<number | null>((resolve, reject) => {
         child.once('error', reject)
         child.once('exit', (code) => resolve(code))
       })
-      expect(exitCode).toBe(0)
+      if (exitCode !== 0) {
+        throw new Error(`Windows self-uninstall helper exited ${String(exitCode)}\nstdout:\n${stdout}\nstderr:\n${stderr}`)
+      }
 
       const deadline = Date.now() + 5000
       while ((existsSync(executable) || existsSync(dataRoot)) && Date.now() < deadline) {
