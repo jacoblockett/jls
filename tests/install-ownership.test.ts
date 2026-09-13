@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -82,5 +82,18 @@ describe('installation ownership contract', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+
+  test('lifecycle preflights ownership before destructive replacement and only cleans JLS meta roots', () => {
+    const source = readFileSync(new URL('../src/jls-v04-core.ts', import.meta.url), 'utf8')
+    const installStart = source.indexOf('function installTargets(')
+    const preflight = source.indexOf('assertInstallCollisions(pkg, scope, targets)', installStart)
+    const destructiveReplace = source.indexOf('rmSync(dest, { recursive: true, force: true })', installStart)
+    expect(preflight).toBeGreaterThan(installStart)
+    expect(destructiveReplace).toBeGreaterThan(preflight)
+    expect(source).toContain('assertVacantOrOwned(dest, previous?.name === skill')
+    expect(source).toContain('cleanupRuntimeMetaRoot(group.scope.root)')
+    expect(source).not.toContain('rmSync(paths.skillRoot')
+    expect(source).not.toContain('rmSync(parent)')
   })
 })
