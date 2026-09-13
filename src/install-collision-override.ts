@@ -52,7 +52,7 @@ function runtimeCliPath(manifest: SkillPackageManifest, scope: CollisionScope): 
 
 function installedPackageManifest(skillPath: string): SkillPackageManifest | undefined {
   const path = join(skillPath, 'manifest.json')
-  if (!existsSync(path) || !statSync(path).isFile()) return undefined
+  if (!existsSync(path) || !lstatSync(path).isFile()) return undefined
   try {
     return parseSkillPackageManifest(JSON.parse(readFileSync(path, 'utf8')))
   } catch {
@@ -225,6 +225,7 @@ export function detectInstallCollisions(
       if (filePathCollides(target.destination, priorResources)) add(target.destination)
     }
 
+    addBlockingContainers(paths.instruction, scope.root, add)
     if (instructionPathCollides(paths.instruction, skill)) add(paths.instruction)
   }
 
