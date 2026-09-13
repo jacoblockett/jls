@@ -151,8 +151,8 @@ function optionText<Value>(
   const label = option.label
   const description = option.description ? ` ${styleText('dim', `(${option.description})`)}` : ''
   if (state === 'disabled') {
-    const suffix = option.disabledSuffix ? styleText('gray', option.disabledSuffix) : ''
-    return `${styleText('gray', S_CHECKBOX_INACTIVE)} ${styleText(['strikethrough', 'gray'], label)}${suffix}`
+    const suffix = option.disabledSuffix ? styleText('dim', option.disabledSuffix) : ''
+    return `${styleText('gray', S_CHECKBOX_INACTIVE)} ${styleText(['strikethrough', 'gray'], label)}${description}${suffix}`
   }
   if (state === 'active') return `${styleText('cyan', S_CHECKBOX_ACTIVE)} ${label}${description}`
   if (state === 'selected') return `${styleText('green', S_CHECKBOX_SELECTED)} ${styleText('dim', label)}`
