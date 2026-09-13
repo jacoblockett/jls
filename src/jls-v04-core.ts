@@ -341,10 +341,6 @@ function discoverInstallations(scope: Scope): InstallGroup[] {
     .sort((a, b) => a.key.localeCompare(b.key))
 }
 
-function groupForSkill(scope: Scope, skill: string): InstallGroup | undefined {
-  return discoverInstallations(scope).find((group) => group.skill === skill)
-}
-
 function installedVersions(group: InstallGroup): string[] {
   return [...new Set(group.targets.map((target) => target.version))].sort()
 }
@@ -510,7 +506,7 @@ function uninstallGroup(group: InstallGroup): void {
       rmSync(runtimeRoot, { recursive: true, force: true })
     }
     rmSync(cachedManifestPath(group.skill), { force: true })
-    cleanupRuntimeMetaRoot(group.scope.root)
+    cleanupRuntimeMetaRoot(group.scope.root, hadRuntime)
   }
 }
 
