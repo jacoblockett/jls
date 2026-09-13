@@ -7,7 +7,6 @@ import {
   type DownloadedSkillPackage,
   type SkillPackageManifest,
 } from './installer-updater'
-import { compiledTarget } from './targets'
 
 export type CollisionScope = {
   kind: 'user' | 'project'
@@ -46,7 +45,7 @@ function runtimeCliPath(manifest: SkillPackageManifest, scope: CollisionScope): 
   return join(
     runtimeSkillRoot(scope.root, manifest.name),
     'bin',
-    `${manifest.runtime_cli}${compiledTarget().executableSuffix}`,
+    `${manifest.runtime_cli}${isWindows ? '.exe' : ''}`,
   )
 }
 
