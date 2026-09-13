@@ -155,8 +155,9 @@ describe('0.4 interactive flow contract', () => {
 
   test('install disables a skill only when every targetable harness already has it', () => {
     expect(source).toContain('detected.every((agent) => targetInstalled(scope, skill, agent.id))')
-    expect(source).toContain("disabledSuffix: installedEverywhere ? ' (already installed)' : undefined")
+    expect(source).toContain("disabledSuffix: installedEverywhere ? ' (installed)' : undefined")
     expect(source).toContain('selectedSkills.every((skill) => targetInstalled(scope, skill, agent.id))')
+    expect(source).toContain("disabledSuffix: alreadyInstalled ? ' (already installed)' : undefined")
     expect(source).toContain("For which of the following AI harnesses would you like to install your selected skills? If you don't see your desired harness here, it is either undetected or unsupported.")
   })
 
@@ -177,9 +178,10 @@ describe('0.4 interactive flow contract', () => {
     expect(coreSource).toContain('staleTargets.map((target) => ({')
   })
 
-  test('updates have a confirmation and neutral no-update state', () => {
+  test('updates have explicit single and multiple branches plus neutral no-update state', () => {
+    expect(source).toContain('if (available.length === 1) {')
+    expect(source).toContain('Would you like to update the ${displaySkillName(group.skill)} skill (${updateStatus(group, availableVersions)})?')
     expect(source).toContain("'The following updates are available. Please select which you would like to install.'")
-    expect(source).toContain('prompts.note(updateSummary(scope, groups, availableVersions))')
     expect(source).toContain("prompts.log.info('No updates were found.')")
   })
 
