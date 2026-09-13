@@ -44,6 +44,10 @@ function versionState(installedVersion: string, availableVersion: string): 'curr
   return comparison >= 0 ? 'current' : 'stale'
 }
 
+export function staleUpdateTargets<T extends { version: string }>(targets: T[], availableVersion: string): T[] {
+  return targets.filter((target) => compareVersions(target.version, availableVersion) === -1)
+}
+
 export function classifyInstallTargets(
   skills: string[],
   agents: string[],
