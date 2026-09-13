@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test'
+import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import {
   encodeWindowsFinalizer,
   prepareInstallerSelfUninstall,
@@ -44,6 +46,45 @@ describe('cross-platform installer self-uninstall', () => {
     const implementation = readFileSync(new URL('../src/self-uninstall.ts', import.meta.url), 'utf8')
     expect(implementation).toContain("'-EncodedCommand'")
     expect(implementation).not.toContain("'-Command',\n    WINDOWS_FINALIZER")
+  })
+
+  test('Windows encoded finalizer reaches READY and completes after its parent exits', async () => {
+    if (process.platform !== 'win32') return
+
+    const root = mkdtempSync(join(tmpdir(), 'jls-self-uninstall-win-'))
+    const executable = join(root, 'jls-copy.exe')
+    const dataRoot = join(root, 'data')
+    const helper = join(root, 'arm.ts')
+    writeFileSync(executable, 'portable binary placeholder')
+    mkdirSync(dataRoot)
+    writeFileSync(join(dataRoot, 'metadata.json'), '{}')
+
+    const moduleUrl = pathToFileURL(new URL('../src/self-uninstall.ts', import.meta.url).pathname).href
+    writeFileSync(helper, [
+      `import { armWindowsSelfUninstall } from ${JSON.stringify(moduleUrl)}`,
+      'await armWindowsSelfUninstall(process.argv[2]!, process.argv[3]!)',
+    ].join('\n'))
+
+    try {
+      const child = spawn(process.execPath, [helper, executable, dataRoot], {
+        stdio: 'ignore',
+        windowsHide: true,
+      })
+      const exitCode = await new Promise<number | null>((resolve, reject) => {
+        child.once('error', reject)
+        child.once('exit', (code) => resolve(code))
+      })
+      expect(exitCode).toBe(0)
+
+      const deadline = Date.now() + 5000
+      while ((existsSync(executable) || existsSync(dataRoot)) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+      expect(existsSync(executable)).toBe(false)
+      expect(existsSync(dataRoot)).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   test('Windows finalizer verifies deletion, reports failures, and avoids an empty final branch', () => {
