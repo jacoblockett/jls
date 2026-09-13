@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { classifyInstallTargets, satisfiedSkills, staleSkills } from '../src/install-preflight'
+import { classifyInstallTargets, satisfiedSkills, staleSkills, staleUpdateTargets } from '../src/install-preflight'
 
 describe('install preflight classification', () => {
   test('classifies missing, satisfied, stale, configure, unknown, and newer targets without downgrading', () => {
@@ -114,6 +114,18 @@ describe('install preflight classification', () => {
     ])
   })
 
+  test('updates select only stale targets and never current, newer, or unknown versions', () => {
+    const targets = [
+      { agent: 'stale', version: '0.1.0' },
+      { agent: 'current', version: '0.2.0' },
+      { agent: 'newer', version: '0.3.0' },
+      { agent: 'unknown', version: 'unknown' },
+    ]
+    expect(staleUpdateTargets(targets, '0.2.0')).toEqual([
+      { agent: 'stale', version: '0.1.0' },
+    ])
+  })
+
   test('a skill is already installed only when every requested harness target is satisfied', () => {
     const complete = classifyInstallTargets(
       ['map'],
@@ -145,7 +157,7 @@ describe('0.4 interactive flow contract', () => {
     expect(source).toContain('detected.every((agent) => targetInstalled(scope, skill, agent.id))')
     expect(source).toContain("disabledSuffix: installedEverywhere ? ' (already installed)' : undefined")
     expect(source).toContain('selectedSkills.every((skill) => targetInstalled(scope, skill, agent.id))')
-    expect(source).toContain("For which of the following AI harnesses would you like to install your selected skills? If you don't see your desired harness here, it is either undetected or unsupported.")
+    expect(source).toContain('The following supported AI harnesses were detected. You can opt out of any of these if you like.')
   })
 
   test('instruction injection defaults on for capable selected skills', () => {
@@ -157,6 +169,12 @@ describe('0.4 interactive flow contract', () => {
     expect(coreSource).toContain("const actionable = planned.filter((target) => target.state === 'missing' || target.state === 'configure')")
     expect(source).not.toContain('Which would you like to update instead?')
     expect(coreSource).not.toContain('Which would you like to update instead?')
+  })
+
+  test('updates target only stale harness installations', () => {
+    expect(coreSource).toContain("import { classifyInstallTargets, staleUpdateTargets, type InstallTargetState } from './install-preflight'")
+    expect(coreSource).toContain('const staleTargets = staleUpdateTargets(group.targets, released.version)')
+    expect(coreSource).toContain('staleTargets.map((target) => ({')
   })
 
   test('updates have a confirmation and neutral no-update state', () => {
