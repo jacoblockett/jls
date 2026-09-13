@@ -163,7 +163,6 @@ describe('skill package contract', () => {
       generated_data: [{
         path: '.example',
         marker: 'project.json',
-        ownership_marker: '.jls-owned.json',
       }],
     })
     expect(parsed.name).toBe('example-skill')
@@ -171,7 +170,6 @@ describe('skill package contract', () => {
     expect(parsed.generated_data?.[0]).toEqual({
       path: '.example',
       marker: 'project.json',
-      ownership_marker: '.jls-owned.json',
     })
     expect(() => parseSkillPackageManifest({
       format: 1,
@@ -181,6 +179,19 @@ describe('skill package contract', () => {
       description: 'Example',
       skill_files: ['../escape'],
     })).toThrow('relative contained path')
+  })
+
+  test('legacy ownership_marker fields are ignored rather than becoming runtime ownership state', () => {
+    const parsed = parseSkillPackageManifest({
+      format: 1,
+      name: 'example-skill',
+      version: '1.2.3',
+      min_installer: '0.7.0',
+      description: 'Example',
+      skill_files: ['SKILL.md'],
+      generated_data: [{ path: '.example', marker: 'project.json', ownership_marker: '.jls-owned.json' }],
+    })
+    expect(parsed.generated_data?.[0]).toEqual({ path: '.example', marker: 'project.json' })
   })
 
   test('download verifies and extracts a referenced package', async () => {
