@@ -5,13 +5,11 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
-import { spawn } from 'node:child_process'
 import { containedPath, extractZip } from './archive'
 import { compiledTarget, isTargetKey, type TargetKey } from './targets'
 
@@ -304,26 +302,6 @@ export async function stageInstallerUpdate(
     try { rmSync(staged, { force: true }) } catch {}
     throw error
   }
-}
-
-export function windowsReplacementCommand(staged: string, executable: string): string {
-  const stagedEscaped = staged.replaceAll('"', '""')
-  const executableEscaped = executable.replaceAll('"', '""')
-  return `ping 127.0.0.1 -n 2 >nul & move /y "${stagedEscaped}" "${executableEscaped}" >nul`
-}
-
-export function scheduleInstallerReplacement(staged: string, executable: string): void {
-  if (process.platform !== 'win32') {
-    renameSync(staged, executable)
-    return
-  }
-
-  const child = spawn('cmd.exe', ['/d', '/s', '/c', windowsReplacementCommand(staged, executable)], {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true,
-  })
-  child.unref()
 }
 
 function packagePath(value: unknown, label: string): string {
