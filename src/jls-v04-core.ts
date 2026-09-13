@@ -1,5 +1,4 @@
-import * as prompts from '@clack/prompts'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import {
   chmodSync,
   existsSync,
@@ -14,8 +13,6 @@ import {
 } from 'node:fs'
 import { homedir, platform } from 'node:os'
 import { basename, dirname, join, normalize, resolve } from 'node:path'
-import { styleText } from 'node:util'
-import { exclusiveMultiselect, type ExclusiveOption } from './exclusive-multiselect'
 import {
   HARNESS_ADAPTERS,
   harnessAdapter,
@@ -24,34 +21,30 @@ import {
   type HarnessPaths,
 } from './harnesses'
 import { classifyInstallTargets, type InstallTargetState } from './install-preflight'
-import { BACK_SIGNAL, navSelect, navText, type NavOption } from './nav-prompts'
 import {
-  checkInstallerUpdate,
   compareVersions,
   downloadSkillPackage,
   fetchStableReleaseManifest,
   parseSkillPackageManifest,
-  scheduleInstallerReplacement,
-  stageInstallerUpdate,
   type DownloadedSkillPackage,
   type ReleaseManifest,
   type SkillPackageManifest,
 } from './installer-updater'
 import {
-  detectGeneratedCleanup,
-  removeGeneratedCleanup,
-  type DetectedCleanup,
-  type RawSkillManifest,
-} from './generated-cleanup'
+  assertGeneratedDataOwnership,
+  assertRuntimeLayoutAvailable,
+  assertVacantOrOwned,
+  cleanupRuntimeMetaRoot,
+  markRuntimeLayout,
+  runtimeSkillOwned,
+  runtimeSkillRoot,
+} from './install-ownership'
 import { renderResource } from './resource-render'
 import { compiledTarget } from './targets'
 import installerManifest from '../manifest.json'
 
 const VERSION = installerManifest.version
-const PROMPTS_VERSION = '1.7.0'
 const isWindows = platform() === 'win32'
-const HOME = Symbol('jls-home')
-const NO_UPDATES = Symbol('jls-no-updates')
 
 type Manifest = SkillPackageManifest
 
@@ -62,10 +55,13 @@ type Scope = {
   root: string
 }
 
-type AgentSpec = HarnessAdapter
-type AgentInfo = AgentSpec & { detected: boolean }
-type ParsedAction = { skills: string[]; scope?: string; agents: string[]; instructions?: boolean }
-type ChoiceItem = { value: string; label: string; disabled?: boolean; disabledSuffix?: string }
+type ParsedAction = {
+  skills: string[]
+  scope?: string
+  agents: string[]
+  instructions?: boolean
+}
+
 type InstalledTarget = {
   skill: string
   version: string
@@ -74,150 +70,25 @@ type InstalledTarget = {
   instructionPath: string
   instructions: boolean
 }
+
 type InstallGroup = {
   key: string
   skill: string
   scope: Scope
   targets: InstalledTarget[]
 }
-type CleanupGroup = {
-  skill: string
-  description: string
-  cleanups: DetectedCleanup[]
-}
-type StepMemory = {
-  value?: string
-  values?: string[]
-  cursor?: string
-  text?: string
-}
-type WizardState = {
-  shown: boolean
-  steps: Map<string, StepMemory>
-}
-type NavResult<T> = T | typeof BACK_SIGNAL
-type InstallResult = NavResult<number> | typeof HOME
-type UpdateResult = NavResult<number> | typeof HOME | typeof NO_UPDATES
-type InstallTarget = { agent: string; instructions: boolean }
-type HarnessResourceTarget = { source: string; destination: string }
 
-const agentCatalog: AgentSpec[] = HARNESS_ADAPTERS
-
-function newWizardState(): WizardState {
-  return { shown: false, steps: new Map() }
+type InstallTarget = {
+  agent: string
+  instructions: boolean
 }
 
-function memory(state: WizardState, stepId: string): StepMemory {
-  let value = state.steps.get(stepId)
-  if (!value) {
-    value = {}
-    state.steps.set(stepId, value)
-  }
-  return value
+type HarnessResourceTarget = {
+  source: string
+  destination: string
 }
 
-function cancel(): never {
-  prompts.cancel('Cancelled & exited')
-  process.exit(0)
-}
-
-function checked<T>(value: T | symbol): T | symbol {
-  if (prompts.isCancel(value)) cancel()
-  return value
-}
-
-function ensureIntro(state: WizardState): void {
-  if (!state.shown) {
-    prompts.intro(`JLS Installer ${styleText('dim', `v${VERSION}`)}`)
-    state.shown = true
-  }
-}
-
-async function chooseOne(
-  state: WizardState,
-  stepId: string,
-  message: string,
-  options: NavOption<string>[],
-  {
-    allowBack = true,
-    initialValue,
-  }: { allowBack?: boolean; initialValue?: string } = {},
-): Promise<NavResult<string>> {
-  ensureIntro(state)
-  const step = memory(state, stepId)
-  const valid = new Set(options.filter((option) => !option.disabled).map((option) => option.value))
-  const remembered = [step.cursor, step.value, initialValue].find((value) => value !== undefined && valid.has(value))
-  const result = checked(await navSelect({
-    message,
-    options,
-    allowBack,
-    initialValue: remembered,
-    onCursor: (value) => { step.cursor = value },
-  }))
-  if (result === BACK_SIGNAL) return BACK_SIGNAL
-  step.value = result as string
-  step.cursor = result as string
-  return result as string
-}
-
-async function chooseMany(
-  state: WizardState,
-  stepId: string,
-  message: string,
-  items: ChoiceItem[],
-  {
-    allowBack = true,
-    initialValues = [],
-    required = true,
-  }: {
-    allowBack?: boolean
-    initialValues?: string[]
-    required?: boolean
-  } = {},
-): Promise<NavResult<string[]>> {
-  ensureIntro(state)
-  const selectable = items.filter((item) => !item.disabled).map((item) => item.value)
-  const step = memory(state, stepId)
-  const startingValues = (step.values ?? initialValues).filter((value) => selectable.includes(value))
-  const cursorAt = step.cursor && items.some((item) => item.value === step.cursor && !item.disabled)
-    ? step.cursor
-    : selectable[0]
-  const options: ExclusiveOption<string>[] = items.map((item) => ({ ...item }))
-  const selected = checked(await exclusiveMultiselect({
-    message,
-    options,
-    initialValues: startingValues,
-    cursorAt,
-    required,
-    allowBack,
-    onCursor: (value) => { step.cursor = value },
-  }))
-  if (selected === BACK_SIGNAL) return BACK_SIGNAL
-  step.values = [...(selected as string[])]
-  return selected as string[]
-}
-
-async function chooseConfirmation(
-  state: WizardState,
-  stepId: string,
-  safeDefault = false,
-): Promise<NavResult<boolean>> {
-  const step = memory(state, stepId)
-  step.value = undefined
-  step.cursor = undefined
-  const choice = await chooseOne(
-    state,
-    stepId,
-    'Continue?',
-    [
-      { value: 'yes', label: 'Yes' },
-      { value: 'no', label: 'No' },
-    ],
-    { allowBack: true, initialValue: safeDefault ? 'no' : 'yes' },
-  )
-  if (choice === BACK_SIGNAL) return BACK_SIGNAL
-  return choice === 'yes'
-}
+const agentCatalog: HarnessAdapter[] = HARNESS_ADAPTERS
 
 function rawUserHome(): string {
   return process.env.USERPROFILE || process.env.HOME || homedir()
@@ -236,9 +107,9 @@ function expandPath(raw: string): string {
 }
 
 function normalizedPath(path: string): string {
-  const normalized = normalize(path)
-  if (!isWindows) return normalized
-  return normalized.replace(/^([a-z]):/, (_, drive: string) => `${drive.toUpperCase()}:`)
+  const value = normalize(path)
+  if (!isWindows) return value
+  return value.replace(/^([a-z]):/, (_, drive: string) => `${drive.toUpperCase()}:`)
 }
 
 function canonicalPath(raw: string): string {
@@ -248,7 +119,6 @@ function canonicalPath(raw: string): string {
       return normalizedPath(realpathSync.native(absolute))
     } catch {}
   }
-
   if (isWindows) {
     let existing = absolute
     const missing: string[] = []
@@ -264,7 +134,6 @@ function canonicalPath(raw: string): string {
       } catch {}
     }
   }
-
   return normalizedPath(absolute)
 }
 
@@ -285,8 +154,8 @@ function skillMetadataRoot(): string {
   return join(installerDataRoot(), 'skill-manifests')
 }
 
-function scopeSkillRoot(scope: Scope, skill: string): string {
-  return join(scope.root, '.jls', skill)
+function cachedManifestPath(name: string): string {
+  return join(skillMetadataRoot(), `${name}.json`)
 }
 
 function resolveScope(raw: string): Scope {
@@ -298,77 +167,23 @@ function resolveScope(raw: string): Scope {
   }
   if (!value) throw new Error('empty scope')
   const root = canonicalPath(value)
-  if (existsSync(root) && !statSync(root).isDirectory()) throw new Error(`scope path is not a directory: ${root}`)
+  if (!existsSync(root)) throw new Error(`scope path does not exist: ${root}`)
+  if (!statSync(root).isDirectory()) throw new Error(`scope path is not a directory: ${root}`)
   return { kind: 'project', origin: 'custom', identity: root, root }
-}
-
-async function customScope(state: WizardState, stepId: string): Promise<NavResult<Scope>> {
-  const step = memory(state, stepId)
-  const rawPath = checked(await navText({
-    message: 'Enter a custom path.',
-    placeholder: process.cwd(),
-    initialValue: step.text,
-    allowBack: true,
-    validate: (value: string | undefined) => value?.trim() ? undefined : 'Please provide a path.',
-    onInput: (value) => { step.text = value },
-  }))
-  if (rawPath === BACK_SIGNAL) return BACK_SIGNAL
-  const path = (rawPath as string).trim()
-  step.text = path
-  return resolveScope(path)
-}
-
-async function chooseScope(
-  state: WizardState,
-  stepId: string,
-  message: string,
-  allowBack = true,
-): Promise<NavResult<Scope>> {
-  while (true) {
-    const choice = await chooseOne(
-      state,
-      stepId,
-      message,
-      [
-        { value: 'cwd', label: 'Current directory' },
-        { value: 'user', label: 'User account' },
-        { value: 'custom', label: 'Custom path' },
-      ],
-      { allowBack, initialValue: 'cwd' },
-    )
-    if (choice === BACK_SIGNAL) return BACK_SIGNAL
-    if (choice !== 'custom') return resolveScope(choice)
-    const scope = await customScope(state, `${stepId}.custom`)
-    if (scope === BACK_SIGNAL) continue
-    return scope
-  }
-}
-
-function scopePhrase(scope: Scope): string {
-  if (scope.origin === 'current') return 'on your current path'
-  if (scope.origin === 'global') return 'on the global path'
-  return `at ${scope.root}`
 }
 
 function commandExists(command: string): boolean {
   return spawnSync(isWindows ? 'where' : 'which', [command], { stdio: 'ignore', windowsHide: true }).status === 0
 }
 
+function detectedAgents(): string[] {
+  return agentCatalog
+    .filter((agent) => commandExists(agent.command) || agent.detectionPaths(userHome()).some(existsSync))
+    .map((agent) => agent.id)
+}
+
 function normalizeAgents(raw: string[]): string[] {
   return [...new Set(raw.map(normalizeHarnessId))].sort()
-}
-
-function harnessDetected(spec: AgentSpec): boolean {
-  if (commandExists(spec.command)) return true
-  return spec.detectionPaths(userHome()).some(existsSync)
-}
-
-function detectedAgents(): AgentInfo[] {
-  return agentCatalog.map((agent) => ({ ...agent, detected: harnessDetected(agent) }))
-}
-
-function agentLabel(id: string, agents: AgentSpec[] = agentCatalog): string {
-  return agents.find((item) => item.id === id)?.label ?? id
 }
 
 function agentPaths(agent: string, scope: Scope): HarnessPaths {
@@ -389,12 +204,6 @@ function atomicWrite(path: string, data: string | Uint8Array, mode = 0o644): voi
   }
 }
 
-function render(text: string, tokens: Record<string, string>): string {
-  let result = text
-  for (const [from, to] of Object.entries(tokens)) result = result.replaceAll(from, to)
-  return result
-}
-
 function copyPackageEntry(source: string, destination: string, tokens?: Record<string, string>): void {
   if (!existsSync(source)) throw new Error(`missing package asset ${source}`)
   if (statSync(source).isDirectory()) {
@@ -403,7 +212,10 @@ function copyPackageEntry(source: string, destination: string, tokens?: Record<s
     return
   }
   const bytes = readFileSync(source)
-  if (!tokens || Object.keys(tokens).length === 0) return atomicWrite(destination, bytes)
+  if (!tokens || Object.keys(tokens).length === 0) {
+    atomicWrite(destination, bytes)
+    return
+  }
   atomicWrite(destination, renderResource(bytes.toString('utf8'), tokens, destination))
 }
 
@@ -418,37 +230,40 @@ function managedBlockPresent(path: string, skill: string): boolean {
   return current.includes(begin) && current.includes(end)
 }
 
+function assertManagedBlockWritable(path: string, skill: string): void {
+  if (!existsSync(path)) return
+  if (!statSync(path).isFile()) throw new Error(`instruction path collides with a non-file: ${path}`)
+  const { begin, end } = managedMarkers(skill)
+  const current = readFileSync(path, 'utf8')
+  const begins = current.split(begin).length - 1
+  const ends = current.split(end).length - 1
+  if (begins === 0 && ends === 0) return
+  if (begins !== 1 || ends !== 1 || current.indexOf(end) < current.indexOf(begin)) {
+    throw new Error(`instruction file contains an ambiguous JLS ownership block: ${path}`)
+  }
+}
+
 function managedBlock(path: string, skill: string, fragment: string): void {
+  assertManagedBlockWritable(path, skill)
   const { begin, end } = managedMarkers(skill)
   const block = `${begin}\n${fragment.trim()}\n${end}`
   let current = existsSync(path) ? readFileSync(path, 'utf8') : ''
   const beginIndex = current.indexOf(begin)
   const endIndex = current.indexOf(end)
-  if ((beginIndex >= 0) !== (endIndex >= 0)) throw new Error(`malformed jls block in ${path}`)
-  if (beginIndex >= 0) {
-    if (current.split(begin).length !== 2 || current.split(end).length !== 2 || endIndex < beginIndex) {
-      throw new Error(`ambiguous jls block in ${path}`)
-    }
-    current = current.slice(0, beginIndex) + block + current.slice(endIndex + end.length)
-  } else if (!current.trim()) {
-    current = `${block}\n`
-  } else {
-    current = `${current.replace(/[\r\n]+$/, '')}\n\n${block}\n`
-  }
+  if (beginIndex >= 0) current = current.slice(0, beginIndex) + block + current.slice(endIndex + end.length)
+  else if (!current.trim()) current = `${block}\n`
+  else current = `${current.replace(/[\r\n]+$/, '')}\n\n${block}\n`
   atomicWrite(path, current)
 }
 
 function removeManagedBlock(path: string, skill: string): void {
   if (!existsSync(path)) return
+  assertManagedBlockWritable(path, skill)
   const { begin, end } = managedMarkers(skill)
   const current = readFileSync(path, 'utf8')
   const beginIndex = current.indexOf(begin)
   const endIndex = current.indexOf(end)
   if (beginIndex < 0 && endIndex < 0) return
-  if ((beginIndex >= 0) !== (endIndex >= 0)) throw new Error(`malformed jls block in ${path}`)
-  if (current.split(begin).length !== 2 || current.split(end).length !== 2 || endIndex < beginIndex) {
-    throw new Error(`ambiguous jls block in ${path}`)
-  }
   const before = current.slice(0, beginIndex).replace(/[\r\n]+$/, '')
   const after = current.slice(endIndex + end.length).replace(/^[\r\n]+/, '')
   const next = [before, after].filter((part) => part.length > 0).join('\n\n')
@@ -465,24 +280,6 @@ function installedPackageManifest(skillPath: string): Manifest | undefined {
   }
 }
 
-function rawManifest(path: string): RawSkillManifest | undefined {
-  if (!existsSync(path) || !statSync(path).isFile()) return undefined
-  try {
-    const raw = JSON.parse(readFileSync(path, 'utf8')) as RawSkillManifest
-    return raw && typeof raw.name === 'string' ? raw : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function cachedManifestPath(name: string): string {
-  return join(skillMetadataRoot(), `${name}.json`)
-}
-
-function cachePackageManifest(pkg: DownloadedSkillPackage): void {
-  atomicWrite(cachedManifestPath(pkg.manifest.name), readFileSync(join(pkg.root, 'manifest.json')))
-}
-
 function harnessResourceTargets(manifest: Manifest, agent: string, scope: Scope): HarnessResourceTarget[] {
   const declared = manifest.harness_resources?.[agent] ?? {}
   const roots = agentPaths(agent, scope).resources
@@ -497,7 +294,7 @@ function harnessResourceTargets(manifest: Manifest, agent: string, scope: Scope)
 
 function harnessResourcesPresent(skillPath: string, agent: string, scope: Scope): boolean {
   const manifest = installedPackageManifest(skillPath)
-  if (!manifest) return true
+  if (!manifest) return false
   return harnessResourceTargets(manifest, agent, scope).every(({ destination }) => existsSync(destination))
 }
 
@@ -548,56 +345,13 @@ function groupForSkill(scope: Scope, skill: string): InstallGroup | undefined {
   return discoverInstallations(scope).find((group) => group.skill === skill)
 }
 
-function targetInstalled(scope: Scope, skill: string, agent: string): boolean {
-  return !!groupForSkill(scope, skill)?.targets.some((target) => target.agent === agent)
-}
-
-function matchingGroups(parsed: ParsedAction, scope: Scope): InstallGroup[] {
-  const requestedAgents = normalizeAgents(parsed.agents)
-  return discoverInstallations(scope).map((group) => ({
-    ...group,
-    targets: requestedAgents.length > 0
-      ? group.targets.filter((target) => requestedAgents.includes(target.agent))
-      : group.targets,
-  })).filter((group) => {
-    if (parsed.skills.length > 0 && !parsed.skills.includes(group.skill)) return false
-    return group.targets.length > 0
-  })
-}
-
 function installedVersions(group: InstallGroup): string[] {
   return [...new Set(group.targets.map((target) => target.version))].sort()
 }
 
-function stableVersions(release: ReleaseManifest): Record<string, string> {
-  return Object.fromEntries(Object.entries(release.skills).map(([name, skill]) => [name, skill.version]))
-}
-
-function updateAvailable(group: InstallGroup, available: Record<string, string>): boolean {
-  const version = available[group.skill]
-  if (!version) return false
-  return installedVersions(group).some((installed) => {
-    try {
-      return compareVersions(installed, version) < 0
-    } catch {
-      return installed !== version
-    }
-  })
-}
-
-function updateStatus(group: InstallGroup, available: Record<string, string>): string {
-  const version = available[group.skill]
-  if (!version) throw new Error(`stable release does not contain ${group.skill}`)
-  return `${installedVersions(group).join(' / ')} -> ${version}`
-}
-
-function runtimeRoot(manifest: Manifest, scope: Scope): string {
-  return scopeSkillRoot(scope, manifest.name)
-}
-
 function runtimeCliPath(manifest: Manifest, scope: Scope): string {
   if (!manifest.runtime_cli) throw new Error(`${manifest.name} manifest is missing runtime_cli`)
-  return join(runtimeRoot(manifest, scope), 'bin', `${manifest.runtime_cli}${compiledTarget().executableSuffix}`)
+  return join(runtimeSkillRoot(scope.root, manifest.name), 'bin', `${manifest.runtime_cli}${compiledTarget().executableSuffix}`)
 }
 
 function renderInstructionFragment(pkg: DownloadedSkillPackage, cli?: string): string {
@@ -605,7 +359,65 @@ function renderInstructionFragment(pkg: DownloadedSkillPackage, cli?: string): s
   if (!manifest.instruction_fragment) return ''
   const tokenName = manifest.cli_token || 'JL_SKILL_CLI'
   const tokens = cli ? { [`{{${tokenName}}}`]: normalize(cli) } : {}
-  return render(readFileSync(join(pkg.root, manifest.instruction_fragment), 'utf8'), tokens)
+  return Object.entries(tokens).reduce(
+    (text, [from, to]) => text.replaceAll(from, to),
+    readFileSync(join(pkg.root, manifest.instruction_fragment), 'utf8'),
+  )
+}
+
+function runtimeOwnershipEvidence(scope: Scope, skill: string): { root: boolean; skill: boolean } {
+  const groups = discoverInstallations(scope)
+  let root = false
+  let ownedSkill = false
+  for (const group of groups) {
+    for (const target of group.targets) {
+      const manifest = installedPackageManifest(target.skillPath)
+      if (!manifest?.runtime) continue
+      root = true
+      if (group.skill === skill) ownedSkill = true
+    }
+  }
+  return { root, skill: ownedSkill }
+}
+
+function assertInstallCollisions(pkg: DownloadedSkillPackage, scope: Scope, targets: InstallTarget[]): void {
+  const skill = pkg.manifest.name
+
+  if (pkg.manifest.runtime) {
+    const legacy = runtimeOwnershipEvidence(scope, skill)
+    assertRuntimeLayoutAvailable(scope.root, skill, legacy.root, legacy.skill)
+  }
+  assertGeneratedDataOwnership(scope.root, skill, pkg.manifest.generated_data)
+
+  for (const target of targets) {
+    const paths = agentPaths(target.agent, scope)
+    if (existsSync(paths.skillRoot) && !statSync(paths.skillRoot).isDirectory()) {
+      throw new Error(`skill root collides with an existing non-directory: ${paths.skillRoot}`)
+    }
+
+    const dest = join(paths.skillRoot, skill)
+    const previous = installedPackageManifest(dest)
+    assertVacantOrOwned(dest, previous?.name === skill, `${target.agent} skill path`)
+
+    const previouslyOwnedResources = new Set(
+      previous
+        ? harnessResourceTargets(previous, target.agent, scope).map(({ destination }) => normalizedPath(resolve(destination)))
+        : [],
+    )
+    for (const { destination } of harnessResourceTargets(pkg.manifest, target.agent, scope)) {
+      const parent = dirname(destination)
+      if (existsSync(parent) && !statSync(parent).isDirectory()) {
+        throw new Error(`${target.agent} resource root collides with an existing non-directory: ${parent}`)
+      }
+      assertVacantOrOwned(
+        destination,
+        previouslyOwnedResources.has(normalizedPath(resolve(destination))),
+        `${target.agent} harness resource`,
+      )
+    }
+
+    assertManagedBlockWritable(paths.instruction, skill)
+  }
 }
 
 function provisionRuntime(pkg: DownloadedSkillPackage, scope: Scope): { cli?: string } {
@@ -616,8 +428,9 @@ function provisionRuntime(pkg: DownloadedSkillPackage, scope: Scope): { cli?: st
   const target = compiledTarget().key
   const artifact = manifest.runtime_artifacts?.[target]
   if (!artifact) throw new Error(`${manifest.name} has no bundled runtime for ${target}`)
-  const root = runtimeRoot(manifest, scope)
-  mkdirSync(root, { recursive: true })
+
+  markRuntimeLayout(scope.root, manifest.name)
+  const root = runtimeSkillRoot(scope.root, manifest.name)
   const cli = runtimeCliPath(manifest, scope)
   copyPackageEntry(join(pkg.root, artifact), cli)
   try { chmodSync(cli, 0o755) } catch {}
@@ -625,15 +438,18 @@ function provisionRuntime(pkg: DownloadedSkillPackage, scope: Scope): { cli?: st
   return { cli }
 }
 
+function cachePackageManifest(pkg: DownloadedSkillPackage): void {
+  atomicWrite(cachedManifestPath(pkg.manifest.name), readFileSync(join(pkg.root, 'manifest.json')))
+}
+
 function installTargets(
   pkg: DownloadedSkillPackage,
   scope: Scope,
   targets: InstallTarget[],
-  interactive: boolean,
   action: 'install' | 'update',
 ): void {
+  assertInstallCollisions(pkg, scope, targets)
   cachePackageManifest(pkg)
-  if (scope.kind === 'project') mkdirSync(scope.root, { recursive: true })
   const runtime = provisionRuntime(pkg, scope)
   const tokenName = pkg.manifest.cli_token || 'JL_SKILL_CLI'
   const tokens = runtime.cli ? { [`{{${tokenName}}}`]: normalize(runtime.cli) } : {}
@@ -653,18 +469,13 @@ function installTargets(
     else removeManagedBlock(paths.instruction, pkg.manifest.name)
 
     const verb = action === 'update' ? 'Updated' : 'Installed'
-    if (interactive) prompts.log.step(`${verb} ${displaySkillName(pkg.manifest.name)} ${pkg.manifest.version} for ${agentLabel(target.agent)}`)
-    else console.log(`${verb} ${pkg.manifest.name} ${pkg.manifest.version} for ${target.agent} at ${dest}`)
+    console.log(`${verb} ${pkg.manifest.name} ${pkg.manifest.version} for ${target.agent} at ${dest}`)
   }
 }
 
-function configureInstruction(
-  pkg: DownloadedSkillPackage,
-  scope: Scope,
-  target: InstallTargetState,
-  interactive: boolean,
-): void {
+function configureInstruction(pkg: DownloadedSkillPackage, scope: Scope, target: InstallTargetState): void {
   const paths = agentPaths(target.agent, scope)
+  assertManagedBlockWritable(paths.instruction, pkg.manifest.name)
   if (target.requestedInstructions) {
     const cli = pkg.manifest.runtime ? runtimeCliPath(pkg.manifest, scope) : undefined
     const fragment = renderInstructionFragment(pkg, cli)
@@ -673,20 +484,33 @@ function configureInstruction(
   } else {
     removeManagedBlock(paths.instruction, pkg.manifest.name)
   }
-  if (interactive) prompts.log.step(`Configured ${displaySkillName(pkg.manifest.name)} for ${agentLabel(target.agent)}`)
+  console.log(`Configured ${pkg.manifest.name} for ${target.agent}`)
 }
 
-function uninstallGroup(group: InstallGroup, interactive: boolean): void {
+function uninstallGroup(group: InstallGroup): void {
+  let hadRuntime = false
   for (const target of group.targets) {
     const manifest = installedPackageManifest(target.skillPath)
-    if (manifest) removeHarnessResources(manifest, target.agent, group.scope)
+    if (!manifest || manifest.name !== group.skill) {
+      throw new Error(`refusing to uninstall unowned skill path: ${target.skillPath}`)
+    }
+    if (manifest.runtime) hadRuntime = true
+    removeHarnessResources(manifest, target.agent, group.scope)
     rmSync(target.skillPath, { recursive: true, force: true })
     removeManagedBlock(target.instructionPath, group.skill)
-    if (interactive) prompts.log.step(`Uninstalled ${displaySkillName(group.skill)} from ${agentLabel(target.agent)}`)
-    else console.log(`Uninstalled ${group.skill} for ${target.agent} from ${group.scope.identity}`)
+    console.log(`Uninstalled ${group.skill} for ${target.agent} from ${group.scope.root}`)
   }
+
   if (!discoverInstallations(group.scope).some((candidate) => candidate.skill === group.skill)) {
-    rmSync(scopeSkillRoot(group.scope, group.skill), { recursive: true, force: true })
+    const runtimeRoot = runtimeSkillRoot(group.scope.root, group.skill)
+    if (existsSync(runtimeRoot)) {
+      if (!runtimeSkillOwned(group.scope.root, group.skill) && !hadRuntime) {
+        throw new Error(`refusing to remove unowned runtime path: ${runtimeRoot}`)
+      }
+      rmSync(runtimeRoot, { recursive: true, force: true })
+    }
+    rmSync(cachedManifestPath(group.skill), { force: true })
+    cleanupRuntimeMetaRoot(group.scope.root)
   }
 }
 
@@ -702,7 +526,7 @@ function parseAction(args: string[], command: 'install' | 'update' | 'uninstall'
     else if (arg === '--agent') {
       if (i + 1 >= body.length) throw new Error('--agent requires a harness name')
       out.agents.push(body[++i])
-    } else if (arg.startsWith('--agent=')) out.agents.push(arg.slice('--agent='.length))
+    } else if (arg.startsWith('--agent=')) out.agents.push(arg.slice('--agent='.length)
     else if (arg === '--instructions') {
       if (command === 'uninstall') throw new Error('--instructions is not valid for uninstall')
       out.instructions = true
@@ -715,353 +539,113 @@ function parseAction(args: string[], command: 'install' | 'update' | 'uninstall'
   return out
 }
 
-function displaySkillName(name: string): string {
-  return name ? `${name[0].toUpperCase()}${name.slice(1)}` : name
-}
-
-function humanList(values: string[]): string {
-  if (values.length <= 1) return values[0] ?? ''
-  if (values.length === 2) return `${values[0]} and ${values[1]}`
-  return `${values.slice(0, -1).join(', ')}, and ${values.at(-1)}`
+function requireScope(parsed: ParsedAction): Scope {
+  if (!parsed.scope) throw new Error('--scope is required')
+  return resolveScope(parsed.scope)
 }
 
 function requireRelease(release: ReleaseManifest | null): ReleaseManifest {
-  if (!release) throw new Error('no stable jls release is currently available')
+  if (!release) throw new Error('no stable JLS release is currently available')
   return release
 }
 
-async function fetchAvailableSkills(state: WizardState): Promise<ReleaseManifest> {
-  if (!process.stdin.isTTY) return requireRelease(await fetchStableReleaseManifest())
-  ensureIntro(state)
-  const spinner = prompts.spinner({ withGuide: false })
-  spinner.start('Checking available skills')
-  try {
-    return requireRelease(await fetchStableReleaseManifest())
-  } finally {
-    spinner.clear()
+function availableVersions(release: ReleaseManifest): Record<string, string> {
+  return Object.fromEntries(Object.entries(release.skills).map(([name, skill]) => [name, skill.version]))
+}
+
+function ensureReleasedAndCompatible(release: ReleaseManifest, skills: string[]): void {
+  for (const skill of skills) {
+    const released = release.skills[skill]
+    if (!released) throw new Error(`stable release does not contain ${skill}`)
+    if (compareVersions(VERSION, released.min_installer) < 0) {
+      throw new Error(`${skill} ${released.version} requires JLS ${released.min_installer} or newer; running ${VERSION}`)
+    }
   }
 }
 
-function requireReleasedSkills(release: ReleaseManifest, names: string[]): void {
-  for (const name of names) if (!release.skills[name]) throw new Error(`stable release does not contain ${name}`)
-}
+async function installCommand(args: string[]): Promise<number> {
+  const parsed = parseAction(args, 'install')
+  const scope = requireScope(parsed)
+  if (parsed.skills.length === 0) throw new Error('no skills selected')
 
-async function ensureSkillCompatibility(
-  release: ReleaseManifest,
-  skills: string[],
-  state: WizardState,
-): Promise<boolean> {
-  const incompatible = skills.filter((name) => compareVersions(VERSION, release.skills[name].min_installer) < 0)
-  if (incompatible.length === 0) return true
-  const latestSatisfies = incompatible.every((name) => compareVersions(release.installer.version, release.skills[name].min_installer) >= 0)
-  const lines = incompatible.map((name) => `${displaySkillName(name)} ${release.skills[name].version} requires JLS ${release.skills[name].min_installer} or newer; running ${VERSION}.`)
-  if (!process.stdin.isTTY) throw new Error(lines.join(' '))
-  for (const line of lines) prompts.log.warn(line)
-  if (!latestSatisfies) {
-    prompts.log.warn('No compatible stable installer is currently available.')
-    return false
-  }
-  prompts.log.info(`JLS ${release.installer.version} is available and satisfies the requirement.`)
-  await updateInstallerWizard(state)
-  return false
-}
+  const release = requireRelease(await fetchStableReleaseManifest())
+  ensureReleasedAndCompatible(release, parsed.skills)
+  const agents = parsed.agents.length > 0 ? normalizeAgents(parsed.agents) : detectedAgents()
+  if (agents.length === 0) throw new Error('no supported AI harness detected; specify --agent')
 
-async function preparePackages(
-  release: ReleaseManifest,
-  skills: string[],
-  state: WizardState,
-): Promise<Map<string, DownloadedSkillPackage>> {
-  const packages = new Map<string, DownloadedSkillPackage>()
-  const spinner = process.stdin.isTTY ? prompts.spinner({ withGuide: false }) : undefined
-  spinner?.start('Preparing selected skills')
-  try {
-    for (const skill of skills) packages.set(skill, await downloadSkillPackage(skill, release.skills[skill]))
-    return packages
-  } catch (error) {
-    for (const pkg of packages.values()) pkg.cleanup()
-    throw error
-  } finally {
-    spinner?.clear()
-    void state
-  }
-}
-
-function cleanupPackages(packages: Map<string, DownloadedSkillPackage>): void {
-  for (const pkg of packages.values()) pkg.cleanup()
-}
-
-function instructionFiles(agents: string[], scope: Scope): string[] {
-  return [...new Set(agents.map((agent) => basename(agentPaths(agent, scope).instruction)))]
-}
-
-function instructionExplanation(agents: string[], scope: Scope): string {
-  const files = instructionFiles(agents, scope)
-  const names = humanList(files)
-  return files.length === 1
-    ? `The ${names} file contains general instructions that your selected AI tool reads automatically. JLS can add managed skill-specific sections without changing unrelated content.`
-    : `${names} files contain general instructions that your selected AI tools read automatically. JLS can add managed skill-specific sections without changing unrelated content.`
-}
-
-function installSummary(scope: Scope, skills: string[]): string {
-  return [`JLS Installer will install the following skills ${scopePhrase(scope)}:`, ...skills.map((skill) => `- ${displaySkillName(skill)}`)].join('\n')
-}
-
-function updateSummary(scope: Scope, groups: InstallGroup[], available: Record<string, string>): string {
-  return [
-    `JLS Installer will update the following skills ${scopePhrase(scope)}:`,
-    ...groups.map((group) => `- ${displaySkillName(group.skill)} (${updateStatus(group, available)})`),
-  ].join('\n')
-}
-
-function uninstallSummary(scope: Scope, groups: InstallGroup[], removeData: Set<string>, cleanupGroups: CleanupGroup[]): string {
-  const cleanupSkills = new Set(cleanupGroups.map((group) => group.skill))
-  const lines = [`JLS Installer will uninstall the following skills ${scopePhrase(scope)}:`]
-  for (const group of groups) {
-    lines.push(`- ${displaySkillName(group.skill)}`)
-    lines.push('  - Skill/agent files: Remove')
-    if (cleanupSkills.has(group.skill)) lines.push(`  - Generated data: ${removeData.has(group.skill) ? 'Remove' : 'Keep'}`)
-  }
-  return lines.join('\n')
-}
-
-function installPreflight(
-  scope: Scope,
-  skills: string[],
-  agents: string[],
-  injectedSkills: string[],
-  availableVersions: Record<string, string>,
-): InstallTargetState[] {
-  const requestedInstructions = Object.fromEntries(skills.map((skill) => [skill, injectedSkills.includes(skill)]))
+  const requestedInstructions = Object.fromEntries(parsed.skills.map((skill) => [skill, parsed.instructions ?? false]))
   const installedTargets = discoverInstallations(scope).flatMap((group) => group.targets
     .filter((target) => harnessResourcesPresent(target.skillPath, target.agent, scope))
-    .map((target) => ({ skill: group.skill, agent: target.agent, version: target.version, instructions: target.instructions })))
-  return classifyInstallTargets(skills, agents, availableVersions, requestedInstructions, installedTargets)
-}
+    .map((target) => ({
+      skill: group.skill,
+      agent: target.agent,
+      version: target.version,
+      instructions: target.instructions,
+    })))
+  const planned = classifyInstallTargets(parsed.skills, agents, availableVersions(release), requestedInstructions, installedTargets)
+  const actionable = planned.filter((target) => target.state === 'missing' || target.state === 'configure')
 
-async function chooseInstallSkills(
-  release: ReleaseManifest,
-  scope: Scope,
-  agents: string[],
-  state: WizardState,
-  stepId: string,
-  allowBack: boolean,
-): Promise<NavResult<string[]>> {
-  const items = Object.keys(release.skills).sort().map((name) => ({
-    value: name,
-    label: displaySkillName(name),
-    disabled: agents.length > 0 && agents.every((agent) => targetInstalled(scope, name, agent)),
-  }))
-  if (!items.some((item) => !item.disabled)) {
-    prompts.log.info('All available skills are already installed for every detected AI harness.')
-    return BACK_SIGNAL
-  }
-  return chooseMany(state, stepId, 'Which skills would you like to install?', items, { allowBack })
-}
-
-async function chooseInstallAgents(
-  explicit: string[],
-  scope: Scope,
-  skills: string[],
-  state: WizardState,
-  stepId: string,
-): Promise<NavResult<{ values: string[]; all: AgentInfo[] }>> {
-  const all = detectedAgents()
-  if (explicit.length > 0) return { values: normalizeAgents(explicit), all }
-  const detected = all.filter((agent) => agent.detected)
-  if (!process.stdin.isTTY) {
-    if (detected.length === 0) throw new Error('no supported AI harness detected; specify --agent')
-    return { values: detected.map((agent) => agent.id), all }
-  }
-  if (detected.length === 0) {
-    prompts.log.warn('No supported AI harnesses were detected.')
-    return BACK_SIGNAL
-  }
-  const items = detected.map((agent) => ({
-    value: agent.id,
-    label: agent.label,
-    disabled: skills.every((skill) => targetInstalled(scope, skill, agent.id)),
-  }))
-  if (!items.some((item) => !item.disabled)) return BACK_SIGNAL
-  const values = await chooseMany(state, stepId, 'Which AI harnesses should receive these skills?', items, { allowBack: true })
-  if (values === BACK_SIGNAL) return BACK_SIGNAL
-  return { values: normalizeAgents(values), all }
-}
-
-async function chooseInstructionInjection(
-  state: WizardState,
-  stepId: string,
-  agents: string[],
-  scope: Scope,
-  packages: Map<string, DownloadedSkillPackage>,
-): Promise<NavResult<string[]>> {
-  const capable = [...packages.entries()].filter(([, pkg]) => !!pkg.manifest.instruction_fragment).map(([skill]) => skill)
-  if (capable.length === 0) return []
-  prompts.note(instructionExplanation(agents, scope), 'About AI Instruction Files')
-  const files = humanList(instructionFiles(agents, scope))
-  return chooseMany(
-    state,
-    stepId,
-    `Which skills would you like to add to ${files}?`,
-    capable.map((skill) => ({ value: skill, label: displaySkillName(skill) })),
-    { allowBack: true, required: false, initialValues: capable },
-  )
-}
-
-async function installAtScope(
-  scope: Scope,
-  requestedSkills: string[],
-  explicitAgents: string[],
-  instructionOverride: boolean | undefined,
-  state: WizardState,
-  stepPrefix: string,
-  allowBack = true,
-): Promise<InstallResult> {
-  const release = await fetchAvailableSkills(state)
-  const availableVersions = stableVersions(release)
-  let selectedSkills = [...requestedSkills]
-
-  skillStep:
-  while (true) {
-    const initialAgentIds = explicitAgents.length > 0
-      ? normalizeAgents(explicitAgents)
-      : detectedAgents().filter((agent) => agent.detected).map((agent) => agent.id)
-
-    if (selectedSkills.length === 0) {
-      if (!process.stdin.isTTY) throw new Error('no skills selected')
-      const chosen = await chooseInstallSkills(release, scope, initialAgentIds, state, `${stepPrefix}.skills`, allowBack)
-      if (chosen === BACK_SIGNAL) return BACK_SIGNAL
-      selectedSkills = chosen
-    }
-    requireReleasedSkills(release, selectedSkills)
-    if (!await ensureSkillCompatibility(release, selectedSkills, state)) return HOME
-
-    agentStep:
-    while (true) {
-      const agentChoice = await chooseInstallAgents(explicitAgents, scope, selectedSkills, state, `${stepPrefix}.harnesses`)
-      if (agentChoice === BACK_SIGNAL) {
-        if (requestedSkills.length > 0) return BACK_SIGNAL
-        selectedSkills = []
-        continue skillStep
+  for (const skill of parsed.skills) {
+    const states = actionable.filter((target) => target.skill === skill)
+    if (states.length === 0) continue
+    const pkg = await downloadSkillPackage(skill, release.skills[skill])
+    try {
+      const missing = states.filter((target) => target.state === 'missing')
+      if (missing.length > 0) {
+        installTargets(
+          pkg,
+          scope,
+          missing.map((target) => ({ agent: target.agent, instructions: target.requestedInstructions })),
+          'install',
+        )
       }
-
-      const packages = await preparePackages(release, selectedSkills, state)
-      try {
-        instructionStep:
-        while (true) {
-          let injectedSkills: string[]
-          if (instructionOverride === true) {
-            injectedSkills = selectedSkills.filter((skill) => !!packages.get(skill)?.manifest.instruction_fragment)
-          } else if (instructionOverride === false || !process.stdin.isTTY) {
-            injectedSkills = []
-          } else {
-            const choice = await chooseInstructionInjection(
-              state,
-              `${stepPrefix}.instructions`,
-              agentChoice.values,
-              scope,
-              packages,
-            )
-            if (choice === BACK_SIGNAL) continue agentStep
-            injectedSkills = choice
-          }
-
-          if (process.stdin.isTTY) {
-            prompts.note(installSummary(scope, selectedSkills))
-            const proceed = await chooseConfirmation(state, `${stepPrefix}.confirm`)
-            if (proceed === BACK_SIGNAL || !proceed) continue instructionStep
-          }
-
-          const planned = installPreflight(scope, selectedSkills, agentChoice.values, injectedSkills, availableVersions)
-          const actionable = planned.filter((target) => target.state === 'missing' || target.state === 'configure')
-          if (actionable.length === 0) {
-            if (process.stdin.isTTY) prompts.log.info('There is nothing to install.')
-            return HOME
-          }
-
-          for (const skill of selectedSkills) {
-            const pkg = packages.get(skill)!
-            const states = actionable.filter((target) => target.skill === skill)
-            const missing = states.filter((target) => target.state === 'missing').map((target) => target.agent)
-            const configure = states.filter((target) => target.state === 'configure')
-            if (missing.length > 0) {
-              installTargets(
-                pkg,
-                scope,
-                missing.map((agent) => ({ agent, instructions: injectedSkills.includes(skill) })),
-                !!process.stdin.isTTY,
-                'install',
-              )
-            }
-            for (const target of configure) configureInstruction(pkg, scope, target, !!process.stdin.isTTY)
-          }
-          return 0
-        }
-      } finally {
-        cleanupPackages(packages)
+      for (const target of states.filter((candidate) => candidate.state === 'configure')) {
+        configureInstruction(pkg, scope, target)
       }
+    } finally {
+      pkg.cleanup()
     }
   }
+  return 0
 }
 
-async function updateAtScope(
-  scope: Scope,
-  requestedSkills: string[],
-  explicitAgents: string[],
-  instructionOverride: boolean | undefined,
-  state: WizardState,
-  stepPrefix: string,
-): Promise<UpdateResult> {
-  const spinner = process.stdin.isTTY ? prompts.spinner({ withGuide: false }) : undefined
-  spinner?.start('Checking for updates')
-  let release: ReleaseManifest
-  try {
-    release = requireRelease(await fetchStableReleaseManifest())
-  } finally {
-    spinner?.clear()
-  }
-  const availableVersions = stableVersions(release)
-  const parsed: ParsedAction = { skills: requestedSkills, agents: explicitAgents, scope: scope.identity, instructions: instructionOverride }
-  const installed = matchingGroups({ ...parsed, skills: [] }, scope)
-  if (installed.length === 0) return HOME
+function matchingGroups(parsed: ParsedAction, scope: Scope): InstallGroup[] {
+  const requestedAgents = normalizeAgents(parsed.agents)
+  return discoverInstallations(scope)
+    .map((group) => ({
+      ...group,
+      targets: requestedAgents.length > 0
+        ? group.targets.filter((target) => requestedAgents.includes(target.agent))
+        : group.targets,
+    }))
+    .filter((group) => {
+      if (parsed.skills.length > 0 && !parsed.skills.includes(group.skill)) return false
+      return group.targets.length > 0
+    })
+}
 
-  let available = installed.filter((group) => updateAvailable(group, availableVersions))
-  if (requestedSkills.length > 0) available = available.filter((group) => requestedSkills.includes(group.skill))
-  if (available.length === 0) return NO_UPDATES
-
-  let groups = available
-  if (requestedSkills.length === 0 && process.stdin.isTTY) {
-    const width = Math.max(...available.map((group) => displaySkillName(group.skill).length))
-    const selected = await chooseMany(
-      state,
-      `${stepPrefix}.skills`,
-      'The following updates are available. Please select which you would like to install.',
-      available.map((group) => ({
-        value: group.skill,
-        label: `${displaySkillName(group.skill).padEnd(width)}  ${updateStatus(group, availableVersions)}`,
-      })),
-      { allowBack: true },
-    )
-    if (selected === BACK_SIGNAL) return BACK_SIGNAL
-    groups = available.filter((group) => selected.includes(group.skill))
-  }
-
-  requireReleasedSkills(release, groups.map((group) => group.skill))
-  if (!await ensureSkillCompatibility(release, groups.map((group) => group.skill), state)) return HOME
-
-  if (process.stdin.isTTY) {
-    prompts.note(updateSummary(scope, groups, availableVersions))
-    const proceed = await chooseConfirmation(state, `${stepPrefix}.confirm`)
-    if (proceed === BACK_SIGNAL || !proceed) return BACK_SIGNAL
-  }
+async function updateCommand(args: string[]): Promise<number> {
+  const parsed = parseAction(args, 'update')
+  const scope = requireScope(parsed)
+  const release = requireRelease(await fetchStableReleaseManifest())
+  let groups = matchingGroups(parsed, scope)
+  groups = groups.filter((group) => {
+    const released = release.skills[group.skill]
+    if (!released) return false
+    return installedVersions(group).some((version) => compareVersions(version, released.version) < 0)
+  })
 
   for (const group of groups) {
+    ensureReleasedAndCompatible(release, [group.skill])
     const pkg = await downloadSkillPackage(group.skill, release.skills[group.skill])
     try {
       installTargets(
         pkg,
         group.scope,
-        group.targets.map((target) => ({ agent: target.agent, instructions: instructionOverride ?? target.instructions })),
-        !!process.stdin.isTTY,
+        group.targets.map((target) => ({
+          agent: target.agent,
+          instructions: parsed.instructions ?? target.instructions,
+        })),
         'update',
       )
     } finally {
@@ -1071,320 +655,23 @@ async function updateAtScope(
   return 0
 }
 
-function rawManifestForGroup(group: InstallGroup): RawSkillManifest | undefined {
-  for (const target of group.targets) {
-    const raw = rawManifest(join(target.skillPath, 'manifest.json'))
-    if (raw?.name === group.skill) return raw
-  }
-  const cached = rawManifest(cachedManifestPath(group.skill))
-  return cached?.name === group.skill ? cached : undefined
-}
-
-function cleanupGroupsFor(scope: Scope, groups: InstallGroup[]): CleanupGroup[] {
-  const result: CleanupGroup[] = []
-  for (const group of groups) {
-    const manifest = rawManifestForGroup(group)
-    if (!manifest) continue
-    const detected = detectGeneratedCleanup(scope.root, manifest)
-    if (detected.length === 0) continue
-    result.push({
-      skill: group.skill,
-      description: [...new Set(detected.map((cleanup) => cleanup.description))].join('; '),
-      cleanups: detected,
-    })
-  }
-  return result
-}
-
-async function uninstallAtScope(
-  scope: Scope,
-  requestedSkills: string[],
-  explicitAgents: string[],
-  state: WizardState,
-  stepPrefix: string,
-  offerGeneratedData: boolean,
-): Promise<NavResult<number>> {
-  const parsed: ParsedAction = { skills: requestedSkills, agents: explicitAgents, scope: scope.identity }
-  let groups = matchingGroups(parsed, scope)
-  if (requestedSkills.length === 0) {
-    if (!process.stdin.isTTY) throw new Error('no skills selected for uninstall')
-    const available = discoverInstallations(scope)
-    if (available.length === 0) return HOME
-    const selected = await chooseMany(
-      state,
-      `${stepPrefix}.skills`,
-      'Which skills would you like to uninstall?',
-      available.map((group) => ({ value: group.skill, label: displaySkillName(group.skill) })),
-      { allowBack: true },
-    )
-    if (selected === BACK_SIGNAL) return BACK_SIGNAL
-    groups = available.filter((group) => selected.includes(group.skill))
-  }
-  if (groups.length === 0) throw new Error('no installations match uninstall filters')
-
-  let cleanupGroups: CleanupGroup[] = []
-  let removeData = new Set<string>()
-  if (offerGeneratedData && process.stdin.isTTY) {
-    cleanupGroups = cleanupGroupsFor(scope, groups)
-    if (cleanupGroups.length > 0) {
-      const selected = await chooseMany(
-        state,
-        `${stepPrefix}.generated-data`,
-        'The following selected skills have generated data that can also be removed.',
-        cleanupGroups.map((group) => ({
-          value: group.skill,
-          label: `${displaySkillName(group.skill)} ${styleText('dim', `(${group.description})`)}`,
-        })),
-        { allowBack: true, required: false, initialValues: cleanupGroups.map((group) => group.skill) },
-      )
-      if (selected === BACK_SIGNAL) return BACK_SIGNAL
-      removeData = new Set(selected)
-    }
-  }
-
-  if (process.stdin.isTTY) {
-    prompts.note(uninstallSummary(scope, groups, removeData, cleanupGroups))
-    const proceed = await chooseConfirmation(state, `${stepPrefix}.confirm`, true)
-    if (proceed === BACK_SIGNAL || !proceed) return BACK_SIGNAL
-  }
-
-  for (const cleanupGroup of cleanupGroups) {
-    if (!removeData.has(cleanupGroup.skill)) continue
-    for (const cleanup of cleanupGroup.cleanups) removeGeneratedCleanup(scope.root, cleanup)
-    if (process.stdin.isTTY) prompts.log.step(`Removed ${displaySkillName(cleanupGroup.skill)} generated data`)
-  }
-  for (const group of groups) uninstallGroup(group, !!process.stdin.isTTY)
-  return 0
-}
-
-function installerExecutable(): string {
-  if (!Bun.isStandaloneExecutable) throw new Error('installer management is only available from the compiled JLS executable')
-  return canonicalPath(process.execPath)
-}
-
-function scheduleInstallerUninstall(executable: string, dataRoot: string): void {
-  if (isWindows) {
-    const escapedExecutable = executable.replaceAll('"', '""')
-    const escapedDataRoot = dataRoot.replaceAll('"', '""')
-    const command = [
-      'ping 127.0.0.1 -n 2 >nul',
-      `if exist "${escapedDataRoot}" rmdir /s /q "${escapedDataRoot}"`,
-      `del /f /q "${escapedExecutable}"`,
-    ].join(' & ')
-    const child = spawn('cmd.exe', ['/d', '/s', '/c', command], { detached: true, stdio: 'ignore', windowsHide: true })
-    child.unref()
-    return
-  }
-  const child = spawn('/bin/sh', [
-    '-c',
-    'sleep 1; rm -rf -- "$1"; rm -f -- "$2"',
-    'jls-uninstall',
-    dataRoot,
-    executable,
-  ], { detached: true, stdio: 'ignore' })
-  child.unref()
-}
-
-async function updateInstallerWizard(state: WizardState): Promise<UpdateResult> {
-  ensureIntro(state)
-  const executable = installerExecutable()
-  const spinner = prompts.spinner({ withGuide: false })
-  spinner.start('Checking for updates')
-  let update
-  try {
-    update = await checkInstallerUpdate(VERSION)
-  } finally {
-    spinner.clear()
-  }
-  if (!update) {
-    prompts.log.info('Up to date.')
-    return HOME
-  }
-  prompts.note(`An update is available: v${VERSION} -> v${update.version}.\n\nUpdating will end this session. You must relaunch JLS afterward.`)
-  const proceed = await chooseConfirmation(state, 'installer-update.confirm')
-  if (proceed === BACK_SIGNAL || !proceed) return BACK_SIGNAL
-  const staged = await stageInstallerUpdate(executable, update)
-  scheduleInstallerReplacement(staged, executable)
-  return 0
-}
-
-async function uninstallInstallerWizard(state: WizardState): Promise<NavResult<number>> {
-  ensureIntro(state)
-  const executable = installerExecutable()
-  prompts.note('This will uninstall the JLS installer and its installer-owned metadata and tooling. It will not remove installed skills, skill instruction integrations, skill runtimes, or skill-generated data.')
-  const proceed = await chooseConfirmation(state, 'installer-uninstall.confirm', true)
-  if (proceed === BACK_SIGNAL || !proceed) return BACK_SIGNAL
-  scheduleInstallerUninstall(executable, installerDataRoot())
-  return 0
-}
-
-async function manageInstallerWizard(state: WizardState): Promise<NavResult<number>> {
-  while (true) {
-    const choice = await chooseOne(
-      state,
-      'installer.action',
-      'What would you like to do?',
-      [
-        { value: 'update', label: 'Check for updates' },
-        { value: 'uninstall', label: 'Uninstall this installer' },
-      ],
-      { allowBack: true, initialValue: 'update' },
-    )
-    if (choice === BACK_SIGNAL) return BACK_SIGNAL
-    if (choice === 'update') {
-      const result = await updateInstallerWizard(state)
-      if (result === 0) return 0
-      continue
-    }
-    const result = await uninstallInstallerWizard(state)
-    if (result === BACK_SIGNAL) continue
-    return result
-  }
-}
-
-async function manageScopeWizard(scope: Scope, state: WizardState): Promise<NavResult<number>> {
-  const prefix = `manage.${scope.origin}:${scope.identity}`
-  while (true) {
-    const hasInstalled = discoverInstallations(scope).length > 0
-    const choice = await chooseOne(
-      state,
-      `${prefix}.action`,
-      'What would you like to do?',
-      [
-        { value: 'install', label: 'Install new skills' },
-        { value: 'update', label: 'Check for updates', disabled: !hasInstalled },
-        { value: 'uninstall', label: 'Uninstall existing skills', disabled: !hasInstalled },
-      ],
-      { allowBack: true, initialValue: 'install' },
-    )
-    if (choice === BACK_SIGNAL) return BACK_SIGNAL
-
-    if (choice === 'install') {
-      const result = await installAtScope(scope, [], [], undefined, state, `${prefix}.install`, true)
-      if (result === BACK_SIGNAL || result === HOME) continue
-      return result
-    }
-    if (choice === 'update') {
-      const result = await updateAtScope(scope, [], [], undefined, state, `${prefix}.update`)
-      if (result === NO_UPDATES) {
-        prompts.log.info('No updates were found.')
-        continue
-      }
-      if (result === BACK_SIGNAL || result === HOME) continue
-      return result
-    }
-
-    const result = await uninstallAtScope(scope, [], [], state, `${prefix}.uninstall`, true)
-    if (result === BACK_SIGNAL || result === HOME) continue
-    return result
-  }
-}
-
-async function bareWizard(): Promise<number> {
-  if (!process.stdin.isTTY) throw new Error('no command supplied')
-  const state = newWizardState()
-  ensureIntro(state)
-
-  while (true) {
-    const choice = await chooseOne(
-      state,
-      'home.action',
-      'What would you like to do?',
-      [
-        { value: 'current', label: 'Manage skills on the current path' },
-        { value: 'global', label: 'Manage skills on the global path' },
-        { value: 'custom', label: 'Manage skills on a custom path' },
-        { value: 'installer', label: 'Manage installer' },
-      ],
-      { allowBack: false, initialValue: 'current' },
-    )
-
-    if (choice === 'installer') {
-      const result = await manageInstallerWizard(state)
-      if (result === BACK_SIGNAL) continue
-      return result
-    }
-
-    let scope: Scope
-    if (choice === 'current') scope = resolveScope('cwd')
-    else if (choice === 'global') scope = resolveScope('user')
-    else {
-      const custom = await customScope(state, 'home.custom')
-      if (custom === BACK_SIGNAL) continue
-      scope = custom
-    }
-
-    const result = await manageScopeWizard(scope, state)
-    if (result === BACK_SIGNAL) continue
-    return result
-  }
-}
-
-async function installWizard(args: string[]): Promise<number> {
-  const parsed = parseAction(args, 'install')
-  const state = newWizardState()
-  if (parsed.scope) {
-    const result = await installAtScope(resolveScope(parsed.scope), parsed.skills, parsed.agents, parsed.instructions, state, `install.${parsed.scope}`, false)
-    if (result === BACK_SIGNAL) cancel()
-    return result === HOME ? 0 : result
-  }
-  if (!process.stdin.isTTY) throw new Error('--scope is required in non-interactive mode')
-  while (true) {
-    const scope = await chooseScope(state, 'install.scope', 'Where would you like to install skills?', false)
-    if (scope === BACK_SIGNAL) cancel()
-    const result = await installAtScope(scope, parsed.skills, parsed.agents, parsed.instructions, state, `install.${scope.identity}`, true)
-    if (result === BACK_SIGNAL) continue
-    return result === HOME ? 0 : result
-  }
-}
-
-async function updateWizard(args: string[]): Promise<number> {
-  const parsed = parseAction(args, 'update')
-  const state = newWizardState()
-  if (parsed.scope) {
-    const result = await updateAtScope(resolveScope(parsed.scope), parsed.skills, parsed.agents, parsed.instructions, state, `update.${parsed.scope}`)
-    if (result === BACK_SIGNAL) cancel()
-    if (result === NO_UPDATES && process.stdin.isTTY) prompts.log.info('No updates were found.')
-    return 0
-  }
-  if (!process.stdin.isTTY) throw new Error('--scope is required in non-interactive mode')
-  while (true) {
-    const scope = await chooseScope(state, 'update.scope', 'Where would you like to update skills?', false)
-    if (scope === BACK_SIGNAL) cancel()
-    const result = await updateAtScope(scope, parsed.skills, parsed.agents, parsed.instructions, state, `update.${scope.identity}`)
-    if (result === BACK_SIGNAL || result === HOME || result === NO_UPDATES) {
-      if (result === NO_UPDATES) prompts.log.info('No updates were found.')
-      continue
-    }
-    return result
-  }
-}
-
-async function uninstallWizard(args: string[]): Promise<number> {
+async function uninstallCommand(args: string[]): Promise<number> {
   const parsed = parseAction(args, 'uninstall')
-  const state = newWizardState()
-  if (parsed.scope) {
-    const result = await uninstallAtScope(resolveScope(parsed.scope), parsed.skills, parsed.agents, state, `uninstall.${parsed.scope}`, false)
-    if (result === BACK_SIGNAL) cancel()
-    return result === HOME ? 0 : result
-  }
-  if (!process.stdin.isTTY) throw new Error('--scope is required in non-interactive mode')
-  while (true) {
-    const scope = await chooseScope(state, 'uninstall.scope', 'Where would you like to uninstall skills?', false)
-    if (scope === BACK_SIGNAL) cancel()
-    const result = await uninstallAtScope(scope, parsed.skills, parsed.agents, state, `uninstall.${scope.identity}`, false)
-    if (result === BACK_SIGNAL || result === HOME) continue
-    return result
-  }
+  const scope = requireScope(parsed)
+  const groups = matchingGroups(parsed, scope)
+  if (groups.length === 0) throw new Error('no installations match uninstall filters')
+  for (const group of groups) uninstallGroup(group)
+  cleanupRuntimeMetaRoot(scope.root)
+  return 0
 }
 
 function printHelp(): void {
-  console.log(`jls\n\nUsage:\n  jls install [skills...] [--scope user|cwd|PATH] [--agent AGENT]... [--instructions|--no-instructions]\n  jls update [skills...] [--scope user|cwd|PATH] [--agent AGENT]... [--instructions|--no-instructions]\n  jls uninstall [skills...] [--scope user|cwd|PATH] [--agent AGENT]...\n\nSkill-first invocations continue to mean install. Interactive prompts use @clack/prompts ${PROMPTS_VERSION}.\n`)
+  console.log(`jls\n\nUsage:\n  jls install [skills...] [--scope user|cwd|PATH] [--agent AGENT]... [--instructions|--no-instructions]\n  jls update [skills...] [--scope user|cwd|PATH] [--agent AGENT]... [--instructions|--no-instructions]\n  jls uninstall [skills...] [--scope user|cwd|PATH] [--agent AGENT]...\n\nSkill-first invocations continue to mean install.\n`)
 }
 
 export async function main(): Promise<number> {
   const args = process.argv.slice(2)
-  if (args.length === 0) return bareWizard()
+  if (args.length === 0) throw new Error('no lifecycle command supplied')
   if (args.length === 1 && (args[0] === '--version' || args[0] === '-v')) {
     console.log(`jls ${VERSION}`)
     return 0
@@ -1393,9 +680,9 @@ export async function main(): Promise<number> {
     printHelp()
     return 0
   }
-  if (args[0] === 'update') return updateWizard(args)
-  if (args[0] === 'uninstall') return uninstallWizard(args)
-  return installWizard(args)
+  if (args[0] === 'update') return updateCommand(args)
+  if (args[0] === 'uninstall') return uninstallCommand(args)
+  return installCommand(args)
 }
 
 if (import.meta.main) {
