@@ -169,6 +169,11 @@ async function chooseMany(
   ensureIntro(state)
   const selectable = items.filter((item) => !item.disabled).map((item) => item.value)
   const step = memory(state, stepId)
+  if (required && selectable.length === 1) {
+    step.values = [selectable[0]]
+    step.cursor = selectable[0]
+    return [selectable[0]]
+  }
   const startingValues = (step.values ?? initialValues).filter((value) => selectable.includes(value))
   const cursorAt = step.cursor && items.some((item) => item.value === step.cursor && !item.disabled)
     ? step.cursor
@@ -427,17 +432,15 @@ function dimBullet(text: string, indent = ''): string {
   return styleText('dim', `${indent}• ${text}`)
 }
 
-function scopeDescription(scope: Scope): string {
-  if (scope.origin === 'current') return 'your current path'
-  if (scope.origin === 'global') return 'your global path'
-  return 'your custom path'
+function summaryPath(scope: Scope): string {
+  return styleText('italic', scope.root)
 }
 
 function installSummary(scope: Scope, skills: string[]): string {
   return [
-    `JLS Installer will install the following skills on ${scopeDescription(scope)}:`,
+    'The following skills will be installed:',
     '',
-    scope.root,
+    summaryPath(scope),
     '',
     ...skills.map((skill) => dimBullet(displaySkillName(skill))),
   ].join('\n')
@@ -447,7 +450,7 @@ function updateSummary(scope: Scope, groups: InstallGroup[], available: Record<s
   return [
     'The following skills will be updated:',
     '',
-    scope.root,
+    summaryPath(scope),
     '',
     ...groups.map((group) => dimBullet(`${displaySkillName(group.skill)} (${updateStatus(group, available)})`)),
   ].join('\n')
@@ -461,7 +464,7 @@ function uninstallSummary(
 ): string {
   const cleanupSkills = new Set(cleanupGroups.map((group) => group.skill))
   const showGeneratedDetail = removeData.size > 0
-  const lines = ['The following skills will be uninstalled:', '', scope.root, '']
+  const lines = ['The following skills will be uninstalled:', '', summaryPath(scope), '']
   for (const group of groups) {
     lines.push(dimBullet(displaySkillName(group.skill)))
     if (!showGeneratedDetail || !cleanupSkills.has(group.skill)) continue
@@ -472,7 +475,7 @@ function uninstallSummary(
 }
 
 function installedVersions(group: InstallGroup): string[] {
-  return [...new Set(group.targets.map((target) => target.version))].sort()
+  return [...new Set(group.targets.map((target) => target.version)).sort()]
 }
 
 function stableVersions(release: ReleaseManifest): Record<string, string> {
@@ -589,7 +592,6 @@ function runLifecycleItem(
 function finishOperation(level: 'success' | 'info'): void {
   if (level === 'success') prompts.log.success('Done.')
   else prompts.log.info('Done.')
-  prompts.outro('')
 }
 
 async function installAtScope(
@@ -622,6 +624,7 @@ async function installAtScope(
       prompts.log.info('All available skills are already installed for every detected AI harness.')
       return BACK_SIGNAL
     }
+    const skillWasPrompted = selectableSkills.length > 1
 
     const selectedSkills = await chooseMany(
       state,
@@ -648,11 +651,14 @@ async function installAtScope(
         const selected = await chooseMany(
           state,
           `${prefix}.harnesses`,
-          'The following supported AI harnesses were detected. You can opt out of any of these if you like.',
+          "For which of the following AI harnesses would you like to install your selected skills? If you don't see your desired harness here, it is either undetected or unsupported.",
           harnessItems,
           { allowBack: true, initialValues: enabledHarnesses },
         )
-        if (selected === BACK_SIGNAL) continue skillStep
+        if (selected === BACK_SIGNAL) {
+          if (skillWasPrompted) continue skillStep
+          return BACK_SIGNAL
+        }
         selectedAgents = selected
       } else {
         selectedAgents = enabledHarnesses
@@ -689,7 +695,8 @@ async function installAtScope(
             )
             if (selected === BACK_SIGNAL) {
               if (harnessWasPrompted) continue harnessStep
-              continue skillStep
+              if (skillWasPrompted) continue skillStep
+              return BACK_SIGNAL
             }
             injectedSkills = selected
           }
@@ -699,7 +706,8 @@ async function installAtScope(
           if (proceed === BACK_SIGNAL) {
             if (capable.length > 0) continue instructionStep
             if (harnessWasPrompted) continue harnessStep
-            continue skillStep
+            if (skillWasPrompted) continue skillStep
+            return BACK_SIGNAL
           }
 
           for (const skill of selectedSkills) {
@@ -729,6 +737,7 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
     prompts.log.info('No updates were found.')
     return BACK_SIGNAL
   }
+  const selectionWasPrompted = available.length > 1
 
   selectionStep:
   while (true) {
@@ -748,7 +757,10 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
 
     prompts.note(updateSummary(scope, groups, availableVersions))
     const proceed = await chooseConfirmation(state, `${prefix}.confirm`)
-    if (proceed === BACK_SIGNAL) continue selectionStep
+    if (proceed === BACK_SIGNAL) {
+      if (selectionWasPrompted) continue selectionStep
+      return BACK_SIGNAL
+    }
 
     for (const group of groups) {
       const version = availableVersions[group.skill]
@@ -778,6 +790,7 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
 async function uninstallAtScope(scope: Scope, state: WizardState, prefix: string): Promise<NavResult<number>> {
   const available = discoverInstallations(scope)
   if (available.length === 0) return BACK_SIGNAL
+  const skillWasPrompted = available.length > 1
 
   skillStep:
   while (true) {
@@ -806,7 +819,10 @@ async function uninstallAtScope(scope: Scope, state: WizardState, prefix: string
           })),
           { allowBack: true, required: false, initialValues: cleanupGroups.map((group) => group.skill) },
         )
-        if (dataSelection === BACK_SIGNAL) continue skillStep
+        if (dataSelection === BACK_SIGNAL) {
+          if (skillWasPrompted) continue skillStep
+          return BACK_SIGNAL
+        }
         removeData = new Set(dataSelection)
       }
 
@@ -814,7 +830,8 @@ async function uninstallAtScope(scope: Scope, state: WizardState, prefix: string
       const proceed = await chooseConfirmation(state, `${prefix}.confirm`, true)
       if (proceed === BACK_SIGNAL) {
         if (cleanupGroups.length > 0) continue cleanupStep
-        continue skillStep
+        if (skillWasPrompted) continue skillStep
+        return BACK_SIGNAL
       }
 
       for (const group of groups) {
