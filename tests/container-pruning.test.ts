@@ -17,6 +17,20 @@ describe('empty container pruning', () => {
     }
   })
 
+  test('prunes an empty hidden harness shell after its known leaf container is removed', () => {
+    const root = mkdtempSync(join(tmpdir(), 'jls-prune-'))
+    try {
+      const skills = join(root, '.agents', 'skills')
+      mkdirSync(skills, { recursive: true })
+      pruneEmptyContainers([skills])
+      expect(existsSync(skills)).toBe(false)
+      expect(existsSync(join(root, '.agents'))).toBe(false)
+      expect(existsSync(root)).toBe(true)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   test('preserves non-empty containers and their ancestors', () => {
     const root = mkdtempSync(join(tmpdir(), 'jls-prune-'))
     try {
@@ -26,6 +40,20 @@ describe('empty container pruning', () => {
       pruneEmptyContainers([join(root, '.jls'), join(root, '.jls', 'map'), bin])
       expect(existsSync(join(bin, 'keep.txt'))).toBe(true)
       expect(existsSync(join(root, '.jls'))).toBe(true)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('preserves a hidden harness shell containing unrelated content', () => {
+    const root = mkdtempSync(join(tmpdir(), 'jls-prune-'))
+    try {
+      const skills = join(root, '.agents', 'skills')
+      mkdirSync(skills, { recursive: true })
+      writeFileSync(join(root, '.agents', 'keep.txt'), 'keep')
+      pruneEmptyContainers([skills])
+      expect(existsSync(skills)).toBe(false)
+      expect(existsSync(join(root, '.agents', 'keep.txt'))).toBe(true)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
