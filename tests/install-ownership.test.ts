@@ -91,7 +91,7 @@ describe('file-granular installation collision contract', () => {
     }
   })
 
-  test('lifecycle prunes only known empty containers and never recursively owns skill/runtime directories', () => {
+  test('lifecycle supplies explicit shared boundaries around owned skill and runtime subtrees', () => {
     const source = readFileSync(new URL('../src/jls-v04-core.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
     expect(source).toContain("import { containerAncestors, pruneEmptyContainers } from './container-pruning'")
     expect(source).toContain('const collisions = detectInstallCollisions(pkg, scope, targets.map((target) => target.agent))')
@@ -100,11 +100,10 @@ describe('file-granular installation collision contract', () => {
     expect(source).toContain('for (const path of files) removeFile(path)')
     expect(source).toContain('containerAncestors(join(target.skillPath, rel), target.skillPath)')
     expect(source).toContain('target.skillPath,\n      paths.skillRoot,')
-    expect(source).toContain('runtimeMetaRoot(group.scope.root)')
+    expect(source).toContain('...resourceContainers,')
+    expect(source).toContain('runtimeRoot,\n        runtimeMetaRoot(group.scope.root),')
     expect(source).toContain('pruneEmptyContainers([')
-    expect(source).not.toContain('rmSync(dest, { recursive: true, force: true })')
-    expect(source).not.toContain('rmSync(target.skillPath, { recursive: true, force: true })')
-    expect(source).not.toContain('rmSync(runtimeRoot, { recursive: true, force: true })')
+    expect(source).not.toContain('rmSync(paths.skillRoot, { recursive: true, force: true })')
   })
 
   test('legacy marker names are validated cleanup-only state and are never written', () => {
