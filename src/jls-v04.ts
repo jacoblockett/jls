@@ -1,6 +1,6 @@
 import * as prompts from '@clack/prompts'
-import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { homedir, platform } from 'node:os'
 import { basename, dirname, join, normalize, resolve } from 'node:path'
 import { styleText } from 'node:util'
@@ -130,7 +130,13 @@ async function chooseOne(
 ): Promise<NavResult<string>> {
   ensureIntro(state)
   const step = memory(state, stepId)
-  const valid = new Set(options.filter((option) => !option.disabled).map((option) => option.value))
+  const enabled = options.filter((option) => !option.disabled)
+  if (enabled.length === 1) {
+    step.value = enabled[0].value
+    step.cursor = enabled[0].value
+    return enabled[0].value
+  }
+  const valid = new Set(enabled.map((option) => option.value))
   const remembered = [step.cursor, step.value, initialValue].find((value) => value !== undefined && valid.has(value))
   const result = checked(await navSelect({
     message,
@@ -296,12 +302,6 @@ async function customScope(state: WizardState, stepId: string): Promise<NavResul
   return { kind: 'project', origin: 'custom', identity: root, root }
 }
 
-function scopePhrase(scope: Scope): string {
-  if (scope.origin === 'current') return 'on your current path'
-  if (scope.origin === 'global') return 'on the global path'
-  return `on the custom path ${scope.root}`
-}
-
 function scopeArg(scope: Scope): string {
   if (scope.origin === 'current') return 'cwd'
   if (scope.origin === 'global') return 'user'
@@ -423,17 +423,27 @@ function instructionQuestion(agents: string[], scope: Scope): string {
   return `The following skills have instructions to inject into your ${names} ${noun}. You can opt out of any of these if you like. See above for an explanation of ${referent}.`
 }
 
+function dimBullet(text: string, indent = ''): string {
+  return styleText('dim', `${indent}• ${text}`)
+}
+
 function installSummary(scope: Scope, skills: string[]): string {
   return [
-    `JLS Installer will install the following skills ${scopePhrase(scope)}:`,
-    ...skills.map((skill) => `• ${displaySkillName(skill)}`),
+    'The following skills will be installed:',
+    '',
+    scope.root,
+    '',
+    ...skills.map((skill) => dimBullet(displaySkillName(skill))),
   ].join('\n')
 }
 
 function updateSummary(scope: Scope, groups: InstallGroup[], available: Record<string, string>): string {
   return [
-    `JLS Installer will update the following skills ${scopePhrase(scope)}:`,
-    ...groups.map((group) => `• ${displaySkillName(group.skill)} (${updateStatus(group, available)})`),
+    'The following skills will be updated:',
+    '',
+    scope.root,
+    '',
+    ...groups.map((group) => dimBullet(`${displaySkillName(group.skill)} (${updateStatus(group, available)})`)),
   ].join('\n')
 }
 
@@ -445,12 +455,12 @@ function uninstallSummary(
 ): string {
   const cleanupSkills = new Set(cleanupGroups.map((group) => group.skill))
   const showGeneratedDetail = removeData.size > 0
-  const lines = [`JLS Installer will uninstall the following skills ${scopePhrase(scope)}:`]
+  const lines = ['The following skills will be uninstalled:', '', scope.root, '']
   for (const group of groups) {
-    lines.push(`• ${displaySkillName(group.skill)}`)
+    lines.push(dimBullet(displaySkillName(group.skill)))
     if (!showGeneratedDetail || !cleanupSkills.has(group.skill)) continue
-    lines.push('  • Skill/agent files: Remove')
-    lines.push(`  • Generated data: ${removeData.has(group.skill) ? 'Remove' : 'Keep'}`)
+    lines.push(dimBullet('Skill/agent files: Remove', '  '))
+    lines.push(dimBullet(`Generated data: ${removeData.has(group.skill) ? 'Remove' : 'Keep'}`, '  '))
   }
   return lines.join('\n')
 }
@@ -565,16 +575,20 @@ function runLifecycleItem(
 function finishOperation(level: 'success' | 'info'): void {
   if (level === 'success') prompts.log.success('Done.')
   else prompts.log.info('Done.')
-  prompts.outro()
 }
 
-async function installAtScope(scope: Scope, state: WizardState, prefix: string): Promise<NavResult<number>> {
-  const release = await fetchRelease(state, 'Checking available skills')
+async function installAtScope(
+  scope: Scope,
+  state: WizardState,
+  prefix: string,
+  noSkillsDetected = false,
+): Promise<NavResult<number>> {
   const detected = detectedAgents()
   if (detected.length === 0) {
     prompts.log.warn('No supported AI harnesses were detected.')
     return BACK_SIGNAL
   }
+  const release = await fetchRelease(state, 'Checking available skills')
 
   skillStep:
   while (true) {
@@ -597,7 +611,7 @@ async function installAtScope(scope: Scope, state: WizardState, prefix: string):
     const selectedSkills = await chooseMany(
       state,
       `${prefix}.skills`,
-      'Which skills would you like to install?',
+      noSkillsDetected ? 'No skills detected. Which skills would you like to install?' : 'Which skills would you like to install?',
       skillItems,
       { allowBack: true },
     )
@@ -613,14 +627,21 @@ async function installAtScope(scope: Scope, state: WizardState, prefix: string):
       const enabledHarnesses = harnessItems.filter((item) => !item.disabled).map((item) => item.value)
       if (enabledHarnesses.length === 0) continue skillStep
 
-      const selectedAgents = await chooseMany(
-        state,
-        `${prefix}.harnesses`,
-        'The following supported AI harnesses were detected. You can opt out of any of these if you like.',
-        harnessItems,
-        { allowBack: true, initialValues: enabledHarnesses },
-      )
-      if (selectedAgents === BACK_SIGNAL) continue skillStep
+      const harnessWasPrompted = enabledHarnesses.length > 1
+      let selectedAgents: string[]
+      if (harnessWasPrompted) {
+        const selected = await chooseMany(
+          state,
+          `${prefix}.harnesses`,
+          "For which of the following AI harnesses would you like to install your selected skills? If you don't see your desired harness here, it is either undetected or unsupported.",
+          harnessItems,
+          { allowBack: true, initialValues: enabledHarnesses },
+        )
+        if (selected === BACK_SIGNAL) continue skillStep
+        selectedAgents = selected
+      } else {
+        selectedAgents = enabledHarnesses
+      }
 
       const packages = new Map<string, Awaited<ReturnType<typeof import('./installer-updater')['downloadSkillPackage']>>>()
       const spinner = prompts.spinner({ withGuide: false })
@@ -651,7 +672,10 @@ async function installAtScope(scope: Scope, state: WizardState, prefix: string):
               })),
               { allowBack: true, required: false, initialValues: capable },
             )
-            if (selected === BACK_SIGNAL) continue harnessStep
+            if (selected === BACK_SIGNAL) {
+              if (harnessWasPrompted) continue harnessStep
+              continue skillStep
+            }
             injectedSkills = selected
           }
 
@@ -659,7 +683,8 @@ async function installAtScope(scope: Scope, state: WizardState, prefix: string):
           const proceed = await chooseConfirmation(state, `${prefix}.confirm`)
           if (proceed === BACK_SIGNAL) {
             if (capable.length > 0) continue instructionStep
-            continue harnessStep
+            if (harnessWasPrompted) continue harnessStep
+            continue skillStep
           }
 
           for (const skill of selectedSkills) {
@@ -668,10 +693,7 @@ async function installAtScope(scope: Scope, state: WizardState, prefix: string):
               ...lifecycleArgs(scope, selectedAgents),
               injectedSkills.includes(skill) ? '--instructions' : '--no-instructions',
             ])
-            if (!success) {
-              prompts.outro()
-              return 1
-            }
+            if (!success) return 1
           }
           finishOperation('success')
           return 0
@@ -719,10 +741,7 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
         group.skill,
         ...lifecycleArgs(scope, group.targets.map((target) => target.agent)),
       ])
-      if (!success) {
-        prompts.outro()
-        return 1
-      }
+      if (!success) return 1
     }
     finishOperation('info')
     return 0
@@ -784,10 +803,7 @@ async function uninstallAtScope(scope: Scope, state: WizardState, prefix: string
           ['uninstall', group.skill, '--scope', scopeArg(scope)],
           before,
         )
-        if (!success) {
-          prompts.outro()
-          return 1
-        }
+        if (!success) return 1
       }
       finishOperation('success')
       return 0
@@ -811,11 +827,17 @@ async function manageScopeWizard(scope: Scope, state: WizardState): Promise<NavR
   const prefix = `manage.${scope.origin}:${scope.identity}`
   while (true) {
     const hasInstalled = discoverInstallations(scope).length > 0
+    if (!hasInstalled) {
+      const result = await installAtScope(scope, state, `${prefix}.install`, true)
+      if (result === BACK_SIGNAL) return BACK_SIGNAL
+      return result
+    }
+
     const choice = await chooseOne(
       state,
       `${prefix}.action`,
       'What would you like to do?',
-      scopeActionOptions(hasInstalled),
+      scopeActionOptions(true),
       { allowBack: true, initialValue: 'install' },
     )
     if (choice === BACK_SIGNAL) return BACK_SIGNAL
@@ -861,7 +883,6 @@ async function updateInstallerWizard(state: WizardState): Promise<NavResult<numb
   if (proceed === BACK_SIGNAL) return BACK_SIGNAL
   const staged = await stageInstallerUpdate(executable, update)
   scheduleInstallerReplacement(staged, executable)
-  prompts.outro()
   return 0
 }
 
@@ -965,12 +986,8 @@ if (import.meta.main) {
     .then((exitCode) => { process.exitCode = exitCode })
     .catch((error) => {
       const message = `jls: ${error instanceof Error ? error.message : String(error)}`
-      if (interactive) {
-        prompts.log.error(message)
-        prompts.outro()
-      } else {
-        console.error(message)
-      }
+      if (interactive) prompts.log.error(message)
+      else console.error(message)
       process.exitCode = 1
     })
 }
