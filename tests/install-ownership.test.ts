@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -52,6 +52,22 @@ describe('file-granular installation collision contract', () => {
       expect(collisions.map((collision) => collision.path)).not.toContain(join(root, '.jls', 'map'))
     } finally {
       rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('symlinked runtime containers are collisions rather than write-through directories', () => {
+    if (process.platform === 'win32') return
+    const root = mkdtempSync(join(tmpdir(), 'jls-files-'))
+    const outside = mkdtempSync(join(tmpdir(), 'jls-outside-'))
+    try {
+      symlinkSync(outside, join(root, '.jls'))
+      const scope = { kind: 'project', origin: 'custom', identity: root, root } as const
+      const collisions = detectInstallCollisions(runtimePackage(), scope, [])
+      expect(collisions.map((collision) => collision.path)).toContain(join(root, '.jls'))
+      expect(existsSync(join(outside, 'map'))).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+      rmSync(outside, { recursive: true, force: true })
     }
   })
 
