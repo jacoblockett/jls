@@ -91,12 +91,17 @@ describe('file-granular installation collision contract', () => {
     }
   })
 
-  test('lifecycle never recursively replaces or removes skill/runtime directories', () => {
+  test('lifecycle prunes only known empty containers and never recursively owns skill/runtime directories', () => {
     const source = readFileSync(new URL('../src/jls-v04-core.ts', import.meta.url), 'utf8')
+    expect(source).toContain("import { containerAncestors, pruneEmptyContainers } from './container-pruning'")
     expect(source).toContain('const collisions = detectInstallCollisions(pkg, scope, targets.map((target) => target.agent))')
     expect(source).toContain('removeObsoleteSkillFiles(previous, pkg.manifest, dest)')
     expect(source).toContain('removeSkillFiles(manifest, target.skillPath)')
-    expect(source).toContain('for (const path of runtimeFiles(manifest, group.scope)) removeFile(path)')
+    expect(source).toContain('for (const path of files) removeFile(path)')
+    expect(source).toContain('containerAncestors(join(target.skillPath, rel), target.skillPath)')
+    expect(source).toContain('target.skillPath,\n      paths.skillRoot,')
+    expect(source).toContain('runtimeMetaRoot(group.scope.root)')
+    expect(source).toContain('pruneEmptyContainers([')
     expect(source).not.toContain('rmSync(dest, { recursive: true, force: true })')
     expect(source).not.toContain('rmSync(target.skillPath, { recursive: true, force: true })')
     expect(source).not.toContain('rmSync(runtimeRoot, { recursive: true, force: true })')
