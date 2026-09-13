@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -41,7 +41,7 @@ describe('cross-platform installer self-uninstall', () => {
     const encoded = encodeWindowsFinalizer(source)
     expect(Buffer.from(encoded, 'base64').toString('utf16le')).toBe(source)
 
-    const implementation = readFileSyncForTest()
+    const implementation = readFileSync(new URL('../src/self-uninstall.ts', import.meta.url), 'utf8')
     expect(implementation).toContain("'-EncodedCommand'")
     expect(implementation).not.toContain("'-Command',\n    WINDOWS_FINALIZER")
   })
@@ -59,7 +59,3 @@ describe('cross-platform installer self-uninstall', () => {
     expect(source).toContain("[Console]::Error.WriteLine($finalBranch.ToString() + '  ' + $message)")
   })
 })
-
-function readFileSyncForTest(): string {
-  return require('node:fs').readFileSync(new URL('../src/self-uninstall.ts', import.meta.url), 'utf8')
-}
