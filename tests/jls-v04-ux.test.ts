@@ -1,8 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { readFileSync } from 'node:fs'
 import { scopeActionOptions, validateCustomPath } from '../src/jls-v04'
 
 const repo = resolve(import.meta.dir, '..')
@@ -35,14 +34,20 @@ describe('0.4 installer scope UX', () => {
 
 describe('0.4 installer wording and rendering contract', () => {
   const source = readFileSync(join(repo, 'src', 'jls-v04.ts'), 'utf8')
+  const navigation = readFileSync(join(repo, 'src', 'nav-prompts.ts'), 'utf8')
+  const multiselect = readFileSync(join(repo, 'src', 'exclusive-multiselect.ts'), 'utf8')
 
   test('generated-data question matches the approved wording', () => {
     expect(source).toContain('The following skills you selected have data generated beyond its installation. If you would like to retain any of this data, deselect the options below before continuing.')
   })
 
-  test('instruction injection question carries its own context', () => {
-    expect(source).toContain('The following skills have instructions to inject into your ${names} ${noun}. You can opt out of any of these if you like. See above for an explanation of ${referent}.')
+  test('instruction injection uses the requested plural wording and a skill-specific single confirmation', () => {
+    expect(source).toContain('The following skills have instructions to inject into your ${names} ${noun}. Deselect any of these you wish not to be injected. See above for more information.')
+    expect(source).toContain('The ${displaySkillName(skill)} skill has instructions to inject into your ${names} ${noun}. Would you like them to be injected? See above for more information.')
+    expect(source).toContain("{ value: 'inject', label: 'Inject' }")
+    expect(source).toContain("{ value: 'skip', label: 'Do not inject' }")
     expect(source).toContain('AI tools can use instruction files to receive extra directions about how they should work in a project.')
+    expect(source).not.toContain('You can opt out of any of these if you like.')
   })
 
   test('harness picker uses the approved wording verbatim and defaults all feasible harnesses on', () => {
@@ -61,11 +66,15 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).toContain('const result = await installAtScope(scope, state, `${prefix}.install`, true)')
   })
 
-  test('navigation backs through visible steps rather than auto-selected hidden steps', () => {
+  test('navigation backs through visible steps and records Go back as the history hint', () => {
     expect(source).toContain('const skillWasPrompted = selectableSkills.length > 1')
     expect(source).toContain('const selectionWasPrompted = available.length > 1')
     expect(source).toContain('if (skillWasPrompted) continue skillStep')
     expect(source).toContain('if (selectionWasPrompted) continue selectionStep')
+    expect(navigation).toContain("styleText('dim', 'Go back')")
+    expect(navigation).toContain('if (prompt.backRequested) return `${title}${backHistory(hasGuide)}`')
+    expect(multiselect).toContain("styleText('dim', 'Go back')")
+    expect(multiselect).toContain('if (prompt.backRequested) return `${title}${backHistory(hasGuide)}`')
   })
 
   test('zero detected harnesses stop installation explicitly', () => {
@@ -87,32 +96,41 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).toContain("disabledSuffix: installedEverywhere ? ' (already installed)' : undefined")
   })
 
-  test('summaries use the requested action wording, concrete italic path, and dim real bullets', () => {
+  test('all structured summaries normalize and dim paths while dimming only bullet glyphs', () => {
     expect(source).toContain("'The following skills will be installed:'")
     expect(source).toContain("'The following skills will be updated:'")
     expect(source).toContain("'The following skills will be uninstalled:'")
-    expect(source).toContain("return styleText('italic', scope.root)")
-    expect(source).toContain("return styleText('dim', `${indent}• ${text}`)")
+    expect(source).toContain("return styleText(['italic', 'dim'], normalizedPath(scope.root))")
+    expect(source).toContain("return `${indent}${styleText('dim', '•')} ${text}`")
+    expect(source).not.toContain("styleText('dim', `${indent}• ${text}`)")
     expect(source).not.toContain('JLS Installer will install')
-    expect(source).not.toContain('scopeDescription(scope)')
   })
 
   test('uninstall summary stays flat unless generated data is actually selected for removal', () => {
     expect(source).toContain('const showGeneratedDetail = removeData.size > 0')
     expect(source).toContain('if (!showGeneratedDetail || !cleanupSkills.has(group.skill)) continue')
-    expect(source).toContain("lines.push(dimBullet('Skill/agent files: Remove', '  '))")
+    expect(source).toContain("lines.push(noteBullet('Skill/agent files: Remove', '  '))")
     expect(source).toContain("Generated data: ${removeData.has(group.skill) ? 'Remove' : 'Keep'}")
+  })
+
+  test('collisions are disclosed and require an explicit destructive confirmation', () => {
+    expect(source).toContain("prompts.note(collisionSummary(collisions), 'Collisions detected')")
+    expect(source).toContain('The following directories/files would be occupied/overwritten should installation continue. Installation in this case would be destructive and could cause permanent loss of data.')
+    expect(source).toContain("prompts.log.warn('See above. Installation has failed due to colliding directories/files. Would you like to continue with installation despite this collision?')")
+    expect(source).toContain('const destructiveProceed = await chooseConfirmation(state, `${prefix}.collision-confirm`, true)')
+    expect(source).toContain('removeInstallCollisions(collisions)')
   })
 
   test('skill and installer no-update messages match and use info', () => {
     expect(source.match(/prompts\.log\.info\('No updates were found\.'\)/g)?.length).toBe(2)
   })
 
-  test('interactive lifecycle work uses requested status levels and does not append an empty final branch', () => {
-    expect(source).toContain("stdio: ['ignore', 'pipe', 'pipe']")
+  test('interactive lifecycle subprocess is asynchronous so the spinner remains live and all progress nodes use info', () => {
+    expect(source).toContain("const child = spawn(process.execPath, ['--core', ...args]")
     expect(source).toContain('spinner.start(`${words.progress} ${name}`)')
-    expect(source).toContain("if (action === 'update') prompts.log.info(`${words.success} ${name}`)")
-    expect(source).toContain('else prompts.log.success(`${words.success} ${name}`)')
+    expect(source).toContain('await runLifecycle(args)')
+    expect(source).toContain('prompts.log.info(`${words.success} ${name}`)')
+    expect(source).not.toContain('prompts.log.success(`${words.success} ${name}`)')
     expect(source).toContain("if (level === 'success') prompts.log.success('Done.')")
     expect(source).toContain("else prompts.log.info('Done.')")
     expect(source).not.toContain("prompts.outro('')")
@@ -125,10 +143,11 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).not.toContain('scheduleInstallerReplacement(staged, executable)')
   })
 
-  test('installer uninstall wording and implementation match the accepted contract', () => {
+  test('successful installer self-uninstall exits silently while retaining failure handling', () => {
     expect(source).toContain('This will uninstall the current installer binary file from the location you launched it from and remove installer-owned metadata and tooling. Doing so will immediately end the current session. It will not, however, remove or uninstall any currently installed skills, agent files, agent instruction injections, skill runtimes, or generated data from skills.')
     expect(source).toContain("import { prepareInstallerSelfUninstall } from './self-uninstall'")
-    expect(source).toContain('completion = await prepareInstallerSelfUninstall(executable, installerDataRoot())')
+    expect(source).toContain('await prepareInstallerSelfUninstall(executable, installerDataRoot())')
+    expect(source).not.toContain("if (completion === 'complete') finishOperation('success')")
     expect(source).not.toContain('ping 127.0.0.1')
     expect(source).not.toContain("'sleep 1;")
     expect(source).not.toContain('scheduleInstallerUninstall(')
