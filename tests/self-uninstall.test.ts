@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  encodeWindowsFinalizer,
   prepareInstallerSelfUninstall,
   windowsFinalizerScript,
 } from '../src/self-uninstall'
@@ -35,15 +36,30 @@ describe('cross-platform installer self-uninstall', () => {
     expect(source.toLowerCase()).not.toContain('ping ')
   })
 
-  test('Windows finalizer verifies deletion, renders safely, and leaves diagnostics on failure', () => {
+  test('Windows finalizer is transported as a UTF-16LE encoded command', () => {
+    const source = windowsFinalizerScript()
+    const encoded = encodeWindowsFinalizer(source)
+    expect(Buffer.from(encoded, 'base64').toString('utf16le')).toBe(source)
+
+    const implementation = readFileSyncForTest()
+    expect(implementation).toContain("'-EncodedCommand'")
+    expect(implementation).not.toContain("'-Command',\n    WINDOWS_FINALIZER")
+  })
+
+  test('Windows finalizer verifies deletion, reports failures, and avoids an empty final branch', () => {
     const source = windowsFinalizerScript()
     expect(source).toContain('Test-Path -LiteralPath $executable')
     expect(source).toContain('Test-Path -LiteralPath $dataRoot')
     expect(source).toContain("Join-Path $dataRoot 'uninstall-error.json'")
     expect(source).toContain('JLS could not be fully uninstalled.')
-    expect(source).toContain('$successNode = [char]0x25C7')
+    expect(source).toContain('$successNode = [char]0x25C6')
     expect(source).toContain('$finalBranch = [char]0x2514')
     expect(source).toContain("[Console]::Out.WriteLine($successNode.ToString() + '  Done.')")
-    expect(source).toContain('[Console]::Out.WriteLine($finalBranch.ToString())')
+    expect(source).not.toContain('[Console]::Out.WriteLine($finalBranch.ToString())')
+    expect(source).toContain("[Console]::Error.WriteLine($finalBranch.ToString() + '  ' + $message)")
   })
 })
+
+function readFileSyncForTest(): string {
+  return require('node:fs').readFileSync(new URL('../src/self-uninstall.ts', import.meta.url), 'utf8')
+}
