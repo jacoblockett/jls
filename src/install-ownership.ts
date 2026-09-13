@@ -108,15 +108,18 @@ export function markRuntimeLayout(scopeRoot: string, skill: string): void {
   writeMarker(skillRoot, { format: 1, owner: 'jls', kind: 'skill-runtime', skill })
 }
 
-export function cleanupRuntimeMetaRoot(scopeRoot: string): void {
+export function cleanupRuntimeMetaRoot(scopeRoot: string, legacyOwned = false): void {
   const metaRoot = runtimeMetaRoot(scopeRoot)
   if (!existsSync(metaRoot) || !statSync(metaRoot).isDirectory()) return
+  const owned = runtimeRootOwned(scopeRoot)
+  if (!owned && !legacyOwned) return
+
   const entries = readdirSync(metaRoot)
   if (entries.length === 0) {
     rmdirSync(metaRoot)
     return
   }
-  if (!runtimeRootOwned(scopeRoot)) return
+  if (!owned) return
   const remaining = entries.filter((entry) => entry !== OWNERSHIP_MARKER)
   if (remaining.length > 0) return
   rmSync(markerPath(metaRoot), { force: true })
