@@ -46,9 +46,9 @@ describe('0.4 installer wording and rendering contract', () => {
   })
 
   test('harness picker uses the approved wording and defaults all feasible harnesses on', () => {
-    expect(source).toContain("For which of the following AI harnesses would you like to install your selected skills? If you don't see your desired harness here, it is either undetected or unsupported.")
+    expect(source).toContain('The following supported AI harnesses were detected. You can opt out of any of these if you like.')
     expect(source).toContain('initialValues: enabledHarnesses')
-    expect(source).not.toContain('The following supported AI harnesses were detected. You can opt out of any of these if you like.')
+    expect(source).not.toContain("For which of the following AI harnesses would you like to install your selected skills? If you don't see your desired harness here, it is either undetected or unsupported.")
   })
 
   test('single feasible choices and empty scopes skip redundant screens', () => {
@@ -79,33 +79,45 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).toContain("disabledSuffix: installedEverywhere ? ' (already installed)' : undefined")
   })
 
-  test('summaries show the concrete path, dim bullets, and avoid self-reference', () => {
-    expect(source).toContain("'The following skills will be installed:'")
-    expect(source).toContain("'The following skills will be updated:'")
-    expect(source).toContain("'The following skills will be uninstalled:'")
+  test('install summary uses the approved scope wording, concrete path, and real bullets', () => {
+    expect(source).toContain('`JLS Installer will install the following skills on ${scopeDescription(scope)}:`')
+    expect(source).toContain("if (scope.origin === 'current') return 'your current path'")
+    expect(source).toContain("if (scope.origin === 'global') return 'your global path'")
+    expect(source).toContain("return 'your custom path'")
     expect(source).toContain('scope.root')
     expect(source).toContain("return styleText('dim', `${indent}• ${text}`)")
-    expect(source).not.toContain('JLS Installer will install')
-    expect(source).not.toContain('JLS Installer will update')
-    expect(source).not.toContain('JLS Installer will uninstall')
+  })
+
+  test('uninstall summary stays flat unless generated data is actually selected for removal', () => {
     expect(source).toContain('const showGeneratedDetail = removeData.size > 0')
     expect(source).toContain('if (!showGeneratedDetail || !cleanupSkills.has(group.skill)) continue')
+    expect(source).toContain("lines.push(dimBullet('Skill/agent files: Remove', '  '))")
+    expect(source).toContain("Generated data: ${removeData.has(group.skill) ? 'Remove' : 'Keep'}")
   })
 
   test('skill and installer no-update messages match and use info', () => {
     expect(source.match(/prompts\.log\.info\('No updates were found\.'\)/g)?.length).toBe(2)
   })
 
-  test('interactive lifecycle work is quiet, spinner-backed, and does not append an empty outro', () => {
+  test('interactive lifecycle work uses the requested status levels and a real Clack outro', () => {
     expect(source).toContain("stdio: ['ignore', 'pipe', 'pipe']")
     expect(source).toContain('spinner.start(`${words.progress} ${name}`)')
-    expect(source).toContain('prompts.log.success(`${words.success} ${name}`)')
+    expect(source).toContain("if (action === 'update') prompts.log.info(`${words.success} ${name}`)")
+    expect(source).toContain('else prompts.log.success(`${words.success} ${name}`)')
     expect(source).toContain("if (level === 'success') prompts.log.success('Done.')")
     expect(source).toContain("else prompts.log.info('Done.')")
-    expect(source).not.toContain('prompts.outro()')
+    expect(source).toContain("prompts.outro('')")
   })
 
-  test('installer uninstall delegates to the verified cross-platform remover', () => {
+  test('installer update wording and replacement path match the accepted contract', () => {
+    expect(source).toContain('An update was found. Would you like to update from v${VERSION} to v${update.version}? If you choose to update, this current session will end. You must relaunch the installer after updating.')
+    expect(source).toContain("import { prepareInstallerReplacement } from './installer-replacement'")
+    expect(source).toContain('await prepareInstallerReplacement(staged, executable)')
+    expect(source).not.toContain('scheduleInstallerReplacement(staged, executable)')
+  })
+
+  test('installer uninstall wording and implementation match the accepted contract', () => {
+    expect(source).toContain('This will uninstall the current installer binary file from the location you launched it from and remove installer-owned metadata and tooling. Doing so will immediately end the current session. It will not, however, remove or uninstall any currently installed skills, agent files, agent instruction injections, skill runtimes, or generated data from skills.')
     expect(source).toContain("import { prepareInstallerSelfUninstall } from './self-uninstall'")
     expect(source).toContain('completion = await prepareInstallerSelfUninstall(executable, installerDataRoot())')
     expect(source).not.toContain('ping 127.0.0.1')
