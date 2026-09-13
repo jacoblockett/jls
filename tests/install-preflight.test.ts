@@ -145,7 +145,7 @@ describe('0.4 interactive flow contract', () => {
     expect(source).toContain('detected.every((agent) => targetInstalled(scope, skill, agent.id))')
     expect(source).toContain("disabledSuffix: installedEverywhere ? ' (already installed)' : undefined")
     expect(source).toContain('selectedSkills.every((skill) => targetInstalled(scope, skill, agent.id))')
-    expect(source).toContain("'The following supported AI harnesses were detected. You can opt out of any of these if you like.'")
+    expect(source).toContain("For which of the following AI harnesses would you like to install your selected skills? If you don't see your desired harness here, it is either undetected or unsupported.")
   })
 
   test('instruction injection defaults on for capable selected skills', () => {
