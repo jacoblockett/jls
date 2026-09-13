@@ -83,7 +83,7 @@ describe('installation ownership contract', () => {
         kind: 'generated-data',
         skill: 'other',
       }))
-      expect(() => assertGeneratedDataOwnership(root, 'map', specs)).toThrow('does not carry its JLS ownership contract')
+      expect(() => assertGeneratedDataOwnership(root, 'map', specs)).toThrow('invalid JLS ownership contract')
 
       writeFileSync(join(generated, '.jls-owned.json'), JSON.stringify({
         format: 1,
@@ -97,6 +97,31 @@ describe('installation ownership contract', () => {
     }
   })
 
+  test('legacy generated-data ownership may bridge a missing new marker but never override an invalid marker', () => {
+    const root = mkdtempSync(join(tmpdir(), 'jls-owner-'))
+    try {
+      const generated = join(root, '.map')
+      mkdirSync(generated)
+      writeFileSync(join(generated, 'project.json'), '{}')
+      const specs = [{
+        path: '.map',
+        marker: 'project.json',
+        ownership_marker: '.jls-owned.json',
+      }]
+
+      expect(() => assertGeneratedDataOwnership(root, 'map', specs, () => true)).not.toThrow()
+      writeFileSync(join(generated, '.jls-owned.json'), JSON.stringify({
+        format: 1,
+        owner: 'jls',
+        kind: 'generated-data',
+        skill: 'other',
+      }))
+      expect(() => assertGeneratedDataOwnership(root, 'map', specs, () => true)).toThrow('invalid JLS ownership contract')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   test('lifecycle preflights ownership before destructive replacement and only cleans JLS meta roots', () => {
     const source = readFileSync(new URL('../src/jls-v04-core.ts', import.meta.url), 'utf8')
     const installStart = source.indexOf('function installTargets(')
@@ -105,8 +130,15 @@ describe('installation ownership contract', () => {
     expect(preflight).toBeGreaterThan(installStart)
     expect(destructiveReplace).toBeGreaterThan(preflight)
     expect(source).toContain('assertVacantOrOwned(dest, previous?.name === skill')
+    expect(source).toContain('legacyGeneratedDataOwned(scope, skill, target)')
     expect(source).toContain('cleanupRuntimeMetaRoot(group.scope.root, hadRuntime)')
     expect(source).not.toContain('rmSync(paths.skillRoot')
     expect(source).not.toContain('rmSync(parent)')
+  })
+
+  test('agent equals parsing closes both nested calls before the next branch', () => {
+    const source = readFileSync(new URL('../src/jls-v04-core.ts', import.meta.url), 'utf8')
+    expect(source).toContain("out.agents.push(arg.slice('--agent='.length))")
+    expect(source).not.toContain("out.agents.push(arg.slice('--agent='.length)\n")
   })
 })
