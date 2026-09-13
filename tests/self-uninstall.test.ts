@@ -3,7 +3,6 @@ import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import {
   encodeWindowsFinalizer,
   prepareInstallerSelfUninstall,
@@ -59,7 +58,7 @@ describe('cross-platform installer self-uninstall', () => {
     mkdirSync(dataRoot)
     writeFileSync(join(dataRoot, 'metadata.json'), '{}')
 
-    const moduleUrl = pathToFileURL(new URL('../src/self-uninstall.ts', import.meta.url).pathname).href
+    const moduleUrl = new URL('../src/self-uninstall.ts', import.meta.url).href
     writeFileSync(helper, [
       `import { armWindowsSelfUninstall } from ${JSON.stringify(moduleUrl)}`,
       'await armWindowsSelfUninstall(process.argv[2]!, process.argv[3]!)',
