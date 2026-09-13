@@ -31,6 +31,7 @@ import {
   type SkillPackageManifest,
 } from './installer-updater'
 import { detectInstallCollisions } from './install-collision-override'
+import { removeLegacyOwnershipMarker } from './legacy-ownership'
 import { renderResource } from './resource-render'
 import { compiledTarget } from './targets'
 import installerManifest from '../manifest.json'
@@ -385,8 +386,8 @@ function runtimeFiles(manifest: Manifest, scope: Scope): string[] {
 }
 
 function previousManifestForSkill(scope: Scope, skill: string): Manifest | undefined {
-  const cached = cachedPackageManifest(skill)
-  if (cached) return cached
+  // Installed metadata in this scope is authoritative. The global cache is only a
+  // recovery fallback when no matching installed manifest survives locally.
   for (const group of discoverInstallations(scope)) {
     if (group.skill !== skill) continue
     for (const target of group.targets) {
@@ -394,14 +395,25 @@ function previousManifestForSkill(scope: Scope, skill: string): Manifest | undef
       if (manifest?.name === skill) return manifest
     }
   }
-  return undefined
+  return cachedPackageManifest(skill)
 }
 
 function removeLegacyOwnershipMarkers(manifest: Manifest, scope: Scope): void {
-  removeFile(join(runtimeMetaRoot(scope.root), '.jls-owned.json'))
-  removeFile(join(runtimeSkillRoot(scope.root, manifest.name), '.jls-owned.json'))
+  // Legacy marker cleanup is migration-only. A matching filename alone never
+  // establishes ownership, so foreign or malformed files are preserved.
+  removeLegacyOwnershipMarker(
+    join(runtimeMetaRoot(scope.root), '.jls-owned.json'),
+    { kind: 'runtime-root' },
+  )
+  removeLegacyOwnershipMarker(
+    join(runtimeSkillRoot(scope.root, manifest.name), '.jls-owned.json'),
+    { kind: 'skill-runtime', skill: manifest.name },
+  )
   for (const spec of manifest.generated_data ?? []) {
-    removeFile(join(scope.root, spec.path, '.jls-owned.json'))
+    removeLegacyOwnershipMarker(
+      join(scope.root, spec.path, '.jls-owned.json'),
+      { kind: 'generated-data', skill: manifest.name },
+    )
   }
 }
 
