@@ -101,21 +101,21 @@ describe('cross-platform installer self-uninstall', () => {
       }
       expect(existsSync(executable)).toBe(false)
       expect(existsSync(dataRoot)).toBe(false)
+      expect(stdout).toBe('')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
   })
 
-  test('Windows finalizer verifies deletion, reports failures, and avoids an empty final branch', () => {
+  test('Windows finalizer verifies deletion, stays silent on success, and reports failures', () => {
     const source = windowsFinalizerScript()
     expect(source).toContain('Test-Path -LiteralPath $executable')
     expect(source).toContain('Test-Path -LiteralPath $dataRoot')
     expect(source).toContain("Join-Path $dataRoot 'uninstall-error.json'")
     expect(source).toContain('JLS could not be fully uninstalled.')
-    expect(source).toContain('$successNode = [char]0x25C6')
     expect(source).toContain('$finalBranch = [char]0x2514')
-    expect(source).toContain("[Console]::Out.WriteLine($successNode.ToString() + '  Done.')")
-    expect(source).not.toContain('[Console]::Out.WriteLine($finalBranch.ToString())')
+    expect(source).not.toContain('$successNode')
+    expect(source).not.toContain("[Console]::Out.WriteLine")
     expect(source).toContain("[Console]::Error.WriteLine($finalBranch.ToString() + '  ' + $message)")
   })
 })
