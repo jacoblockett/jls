@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readdirSync, rmdirSync } from 'node:fs'
+import { existsSync, lstatSync, readdirSync, rmSync, rmdirSync } from 'node:fs'
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 
 export function containerAncestors(filePath: string, boundary: string): string[] {
@@ -15,31 +15,45 @@ export function containerAncestors(filePath: string, boundary: string): string[]
   return result
 }
 
-function pruneEmptyDirectory(path: string): boolean {
-  if (!existsSync(path)) return false
+function isStrictDescendant(path: string, boundary: string): boolean {
+  const rel = relative(boundary, path)
+  return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)
+}
+
+function removeOwnedSubtree(path: string): void {
+  if (!existsSync(path)) return
   const stat = lstatSync(path)
-  if (!stat.isDirectory() || stat.isSymbolicLink()) return false
-  if (readdirSync(path).length !== 0) return false
+  if (!stat.isDirectory() || stat.isSymbolicLink()) return
+  rmSync(path, { recursive: true, force: true })
+}
+
+function pruneEmptyOwnedRoot(path: string): void {
+  if (!existsSync(path)) return
+  const stat = lstatSync(path)
+  if (!stat.isDirectory() || stat.isSymbolicLink()) return
+  if (readdirSync(path).length !== 0) return
   rmdirSync(path)
-  return true
 }
 
 export function pruneEmptyContainers(paths: string[]): void {
-  // Containers are never ownership evidence. Pruning is safe only because each
-  // candidate is explicitly known and is rechecked to be a real empty directory.
   const candidates = [...new Set(paths.map((path) => resolve(path)))]
-    .sort((a, b) => b.length - a.length)
+  const outerBoundaries = candidates.filter((path) => (
+    !candidates.some((other) => other !== path && isStrictDescendant(path, other))
+  ))
 
-  for (const path of candidates) {
-    if (!pruneEmptyDirectory(path)) continue
+  // The lifecycle passes shared harness containers as outer boundaries and the
+  // JLS-owned skill/runtime directories beneath them as nested candidates.
+  // Remove only those nested owned subtrees. Never climb into or prune the
+  // harness boundary itself (.agents/skills, .codex/agents, .claude/*, etc.).
+  for (const path of candidates.sort((a, b) => b.length - a.length)) {
+    if (outerBoundaries.includes(path)) continue
+    removeOwnedSubtree(path)
+  }
 
-    // Harness adapters commonly create a neutral leaf such as `skills` or
-    // `agents` inside a hidden harness root. If that known leaf is gone and its
-    // immediate hidden parent is now empty, prune that shell too. Never climb
-    // beyond this one parent, so the selected management root is not a candidate.
-    const parent = dirname(path)
-    if (!basename(path).startsWith('.') && basename(parent).startsWith('.')) {
-      pruneEmptyDirectory(parent)
-    }
+  // These outer roots are JLS-owned rather than harness-owned. Remove them only
+  // when empty so another installed skill/runtime or installer manifest survives.
+  for (const path of outerBoundaries) {
+    const name = basename(path)
+    if (name === '.jls' || name === 'skill-manifests') pruneEmptyOwnedRoot(path)
   }
 }
