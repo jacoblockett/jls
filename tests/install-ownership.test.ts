@@ -51,13 +51,33 @@ describe('installation ownership contract', () => {
     }
   })
 
-  test('generated-data collisions require the manifest-declared marker', () => {
+  test('generated-data collisions require the exact manifest-declared JLS ownership contract', () => {
     const root = mkdtempSync(join(tmpdir(), 'jls-owner-'))
     try {
-      mkdirSync(join(root, '.map'))
-      const specs = [{ path: '.map', marker: 'project.json' }]
-      expect(() => assertGeneratedDataOwnership(root, 'map', specs)).toThrow('not identified as map data')
-      writeFileSync(join(root, '.map', 'project.json'), '{}')
+      const generated = join(root, '.map')
+      mkdirSync(generated)
+      writeFileSync(join(generated, 'project.json'), '{}')
+      const specs = [{
+        path: '.map',
+        marker: 'project.json',
+        ownership_marker: '.jls-owned.json',
+      }]
+
+      expect(() => assertGeneratedDataOwnership(root, 'map', specs)).toThrow('does not carry its JLS ownership contract')
+      writeFileSync(join(generated, '.jls-owned.json'), JSON.stringify({
+        format: 1,
+        owner: 'jls',
+        kind: 'generated-data',
+        skill: 'other',
+      }))
+      expect(() => assertGeneratedDataOwnership(root, 'map', specs)).toThrow('does not carry its JLS ownership contract')
+
+      writeFileSync(join(generated, '.jls-owned.json'), JSON.stringify({
+        format: 1,
+        owner: 'jls',
+        kind: 'generated-data',
+        skill: 'map',
+      }))
       expect(() => assertGeneratedDataOwnership(root, 'map', specs)).not.toThrow()
     } finally {
       rmSync(root, { recursive: true, force: true })
