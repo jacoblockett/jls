@@ -10,7 +10,6 @@ function inside(root: string, target: string): string | undefined {
 export function displayManagedPath(scopeRoot: string, target: string): string {
   const rel = inside(scopeRoot, target)
   if (rel === undefined) return target
-  if (rel === '') return scopeRoot
   const anchor = basename(resolve(scopeRoot)) || basename(scopeRoot) || scopeRoot
   return `/${[anchor, ...rel.split(/[\\/]+/)].filter(Boolean).join('/')}`
 }
