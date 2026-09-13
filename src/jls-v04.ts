@@ -174,11 +174,6 @@ async function chooseMany(
   ensureIntro(state)
   const selectable = items.filter((item) => !item.disabled).map((item) => item.value)
   const step = memory(state, stepId)
-  if (required && selectable.length === 1) {
-    step.values = [selectable[0]]
-    step.cursor = selectable[0]
-    return [selectable[0]]
-  }
   const startingValues = (step.values ?? initialValues).filter((value) => selectable.includes(value))
   const cursorAt = step.cursor && items.some((item) => item.value === step.cursor && !item.disabled)
     ? step.cursor
@@ -677,7 +672,7 @@ async function installAtScope(
       prompts.log.info('All available skills are already installed for every detected AI harness.')
       return BACK_SIGNAL
     }
-    const skillWasPrompted = selectableSkills.length > 1
+    const skillWasPrompted = true
 
     const selectedSkills = await chooseMany(
       state,
@@ -827,7 +822,7 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
     prompts.log.info('No updates were found.')
     return BACK_SIGNAL
   }
-  const selectionWasPrompted = available.length > 1
+  const selectionWasPrompted = true
 
   selectionStep:
   while (true) {
@@ -880,7 +875,7 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
 async function uninstallAtScope(scope: Scope, state: WizardState, prefix: string): Promise<NavResult<number>> {
   const available = discoverInstallations(scope)
   if (available.length === 0) return BACK_SIGNAL
-  const skillWasPrompted = available.length > 1
+  const skillWasPrompted = true
 
   skillStep:
   while (true) {
