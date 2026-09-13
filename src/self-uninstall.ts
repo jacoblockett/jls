@@ -112,41 +112,59 @@ export function removeInstallerSynchronously(executable: string, dataRoot: strin
   }
 }
 
-async function waitForReady(child: ChildProcess, readyFile: string, errorFile: string): Promise<void> {
+async function waitForBootstrap(child: ChildProcess): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      child.off('error', onError)
+      child.off('exit', onExit)
+    }
+    const onError = (error: Error) => {
+      cleanup()
+      reject(error)
+    }
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      cleanup()
+      if (code === 0) resolve()
+      else reject(new Error(`self-uninstall bootstrap failed${signal ? ` (${signal})` : ` (exit ${code ?? 1})`}`))
+    }
+
+    child.once('error', onError)
+    child.once('exit', onExit)
+  })
+}
+
+async function waitForReadySignal(readyFile: string, errorFile: string): Promise<void> {
   const directory = dirname(readyFile)
   const readyName = basename(readyFile)
+  const errorName = basename(errorFile)
 
   await new Promise<void>((resolve, reject) => {
     let settled = false
     const watcher = watch(directory, (_event, filename) => {
-      if (!filename || filename.toString() === readyName) checkReady()
+      const name = filename?.toString()
+      if (!name || name === readyName || name === errorName) checkSignal()
     })
 
     const finish = (error?: Error) => {
       if (settled) return
       settled = true
       watcher.close()
-      child.off('error', onError)
-      child.off('exit', onExit)
       if (error) reject(error)
       else resolve()
     }
-    const checkReady = () => {
+    const checkSignal = () => {
+      if (existsSync(errorFile)) {
+        let detail = 'self-uninstall finalizer failed before it was ready'
+        try {
+          const saved = readFileSync(errorFile, 'utf8').trim()
+          if (saved) detail = saved
+        } catch {}
+        return finish(new Error(detail))
+      }
       if (existsSync(readyFile)) finish()
     }
-    const onError = (error: Error) => finish(error)
-    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
-      if (existsSync(readyFile)) return finish()
-      let detail: string | undefined
-      try {
-        if (existsSync(errorFile)) detail = readFileSync(errorFile, 'utf8').trim()
-      } catch {}
-      finish(new Error(detail || `self-uninstall finalizer exited before it was ready${signal ? ` (${signal})` : ` (exit ${code ?? 1})`}`))
-    }
 
-    child.once('error', onError)
-    child.once('exit', onExit)
-    checkReady()
+    checkSignal()
   })
 }
 
@@ -166,11 +184,27 @@ export async function armWindowsSelfUninstall(executable: string, dataRoot: stri
   rmSync(finalizerFile, { force: true })
   writeFileSync(finalizerFile, WINDOWS_FINALIZER, 'utf8')
 
-  // Use -File rather than transporting the finalizer source through the Windows command line.
-  // Do not detach the spawn: Bun's detached Windows child path can discard the argument
-  // contract. The PowerShell process still survives the JLS parent once READY is observed
-  // and child.unref() releases the parent event-loop reference.
-  const child = spawn('powershell.exe', [
+  const env = {
+    ...process.env,
+    JLS_UNINSTALL_PARENT_PID: String(process.pid),
+    JLS_UNINSTALL_EXECUTABLE: executable,
+    JLS_UNINSTALL_DATA_ROOT: dataRoot,
+    JLS_UNINSTALL_READY_FILE: readyFile,
+    JLS_UNINSTALL_ERROR_FILE: errorFile,
+    JLS_UNINSTALL_FINALIZER_FILE: finalizerFile,
+  }
+
+  // Bun's Windows child processes remain in a kill-on-close Job Object, so a directly spawned
+  // finalizer is terminated when JLS exits even after unref(). cmd.exe's START creates the
+  // breakaway process needed for the PowerShell finalizer to survive the Bun parent. Await the
+  // bootstrap itself before trusting READY so START has completed its launch handoff.
+  const bootstrap = spawn('cmd.exe', [
+    '/d',
+    '/c',
+    'start',
+    '',
+    '/b',
+    'powershell.exe',
     '-NoLogo',
     '-NoProfile',
     '-NonInteractive',
@@ -181,19 +215,12 @@ export async function armWindowsSelfUninstall(executable: string, dataRoot: stri
   ], {
     stdio: ['ignore', 'inherit', 'inherit'],
     windowsHide: true,
-    env: {
-      ...process.env,
-      JLS_UNINSTALL_PARENT_PID: String(process.pid),
-      JLS_UNINSTALL_EXECUTABLE: executable,
-      JLS_UNINSTALL_DATA_ROOT: dataRoot,
-      JLS_UNINSTALL_READY_FILE: readyFile,
-      JLS_UNINSTALL_ERROR_FILE: errorFile,
-      JLS_UNINSTALL_FINALIZER_FILE: finalizerFile,
-    },
+    env,
   })
 
   try {
-    await waitForReady(child, readyFile, errorFile)
+    await waitForBootstrap(bootstrap)
+    await waitForReadySignal(readyFile, errorFile)
   } catch (error) {
     let detail: string | undefined
     try {
@@ -205,9 +232,8 @@ export async function armWindowsSelfUninstall(executable: string, dataRoot: stri
     throw new Error(detail || (error instanceof Error ? error.message : String(error)))
   }
 
-  // Once READY exists, the finalizer owns a live handle to this exact process and is blocked
-  // on WaitForExit(). It is now safe for JLS to terminate without a PID-reuse race.
-  child.unref()
+  // READY is written only after the breakaway PowerShell process has acquired a live handle to
+  // this exact JLS process and entered its WaitForExit path. JLS can now terminate safely.
 }
 
 export async function prepareInstallerSelfUninstall(
