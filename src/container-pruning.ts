@@ -1,5 +1,19 @@
 import { existsSync, lstatSync, readdirSync, rmdirSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
+
+export function containerAncestors(filePath: string, boundary: string): string[] {
+  const root = resolve(boundary)
+  let current = dirname(resolve(filePath))
+  const rel = relative(root, current)
+  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return []
+
+  const result: string[] = []
+  while (true) {
+    result.push(current)
+    if (current === root) return result
+    current = dirname(current)
+  }
+}
 
 export function pruneEmptyContainers(paths: string[]): void {
   // Containers are never ownership evidence. Pruning is safe only because each
