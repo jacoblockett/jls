@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { homedir, platform } from 'node:os'
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
 import { HARNESS_ADAPTERS, harnessAdapter } from './harnesses'
@@ -80,11 +80,11 @@ function installedManifests(scope: CollisionScope, skill?: string): SkillPackage
   const result: SkillPackageManifest[] = []
   for (const agent of HARNESS_ADAPTERS) {
     const paths = harnessAdapter(agent.id).paths(scope, userHome())
-    if (!existsSync(paths.skillRoot) || !statSync(paths.skillRoot).isDirectory()) continue
+    if (!existsSync(paths.skillRoot) || !lstatSync(paths.skillRoot).isDirectory()) continue
     for (const entry of readdirSync(paths.skillRoot)) {
       if (skill && entry !== skill) continue
       const skillPath = join(paths.skillRoot, entry)
-      if (!existsSync(skillPath) || !statSync(skillPath).isDirectory()) continue
+      if (!existsSync(skillPath) || !lstatSync(skillPath).isDirectory()) continue
       const manifest = installedPackageManifest(skillPath)
       if (manifest?.name === entry) result.push(manifest)
     }
@@ -143,7 +143,7 @@ function managedRuntimeFiles(scope: CollisionScope, skill: string): Set<string> 
 
 function instructionPathCollides(path: string, skill: string): boolean {
   if (!existsSync(path)) return false
-  if (!statSync(path).isFile()) return true
+  if (!lstatSync(path).isFile()) return true
   const begin = `<!-- jls:begin ${skill} -->`
   const end = `<!-- jls:end ${skill} -->`
   const current = readFileSync(path, 'utf8')
@@ -167,7 +167,9 @@ function addBlockingContainers(
   const boundary = resolve(root)
   while (pathInside(boundary, current)) {
     if (existsSync(current)) {
-      if (!statSync(current).isDirectory()) add(current)
+      // Containers may be shared directories, but never follow a symlinked
+      // component because it can redirect writes outside the selected scope.
+      if (!lstatSync(current).isDirectory()) add(current)
       break
     }
     if (resolve(current) === boundary) break
@@ -177,7 +179,7 @@ function addBlockingContainers(
 
 function filePathCollides(path: string, managed: Set<string>): boolean {
   if (!existsSync(path)) return false
-  if (!statSync(path).isFile()) return true
+  if (!lstatSync(path).isFile()) return true
   return !managed.has(normalizedPath(resolve(path)))
 }
 
@@ -201,11 +203,12 @@ export function detectInstallCollisions(
 
   for (const agent of agents) {
     const paths = harnessAdapter(agent).paths(scope, userHome())
-    if (existsSync(paths.skillRoot) && !statSync(paths.skillRoot).isDirectory()) add(paths.skillRoot)
+    if (existsSync(paths.skillRoot) && !lstatSync(paths.skillRoot).isDirectory()) add(paths.skillRoot)
 
     const destination = join(paths.skillRoot, skill)
-    if (existsSync(destination) && !statSync(destination).isDirectory()) add(destination)
-    const previous = installedPackageManifest(destination)
+    const destinationIsDirectory = existsSync(destination) && lstatSync(destination).isDirectory()
+    if (existsSync(destination) && !destinationIsDirectory) add(destination)
+    const previous = destinationIsDirectory ? installedPackageManifest(destination) : undefined
     const priorSkillFiles = managedSkillFiles(previous?.name === skill ? previous : undefined, destination)
     for (const file of expectedSkillFiles(pkg, destination)) {
       addBlockingContainers(file, destination, add)
