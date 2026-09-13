@@ -4,7 +4,6 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  encodeWindowsFinalizer,
   prepareInstallerSelfUninstall,
   windowsFinalizerScript,
 } from '../src/self-uninstall'
@@ -37,17 +36,15 @@ describe('cross-platform installer self-uninstall', () => {
     expect(source.toLowerCase()).not.toContain('ping ')
   })
 
-  test('Windows finalizer is transported as a UTF-16LE encoded command', () => {
-    const source = windowsFinalizerScript()
-    const encoded = encodeWindowsFinalizer(source)
-    expect(Buffer.from(encoded, 'base64').toString('utf16le')).toBe(source)
-
+  test('Windows finalizer is transported through a temporary PowerShell file', () => {
     const implementation = readFileSync(new URL('../src/self-uninstall.ts', import.meta.url), 'utf8')
-    expect(implementation).toContain("'-EncodedCommand'")
-    expect(implementation).not.toContain("'-Command',\n    WINDOWS_FINALIZER")
+    expect(implementation).toContain("'-File',")
+    expect(implementation).toContain('JLS_UNINSTALL_FINALIZER_FILE: finalizerFile')
+    expect(implementation).toContain("writeFileSync(finalizerFile, WINDOWS_FINALIZER, 'utf8')")
+    expect(implementation).not.toContain("'-EncodedCommand'")
   })
 
-  test('Windows encoded finalizer reaches READY and completes after its parent exits', async () => {
+  test('Windows finalizer reaches READY and completes after its parent exits', async () => {
     if (process.platform !== 'win32') return
 
     const root = mkdtempSync(join(tmpdir(), 'jls-self-uninstall-win-'))
