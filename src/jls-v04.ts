@@ -28,6 +28,7 @@ import {
   removeInstallCollisions,
   type InstallCollision,
 } from './install-collision-override'
+import { displayManagedPath } from './display-path'
 import { prepareInstallerSelfUninstall } from './self-uninstall'
 import { main as lifecycleMain } from './jls-v04-core'
 import installerManifest from '../manifest.json'
@@ -61,7 +62,6 @@ type InstallGroup = {
 
 type CleanupGroup = {
   skill: string
-  description: string
   cleanups: DetectedCleanup[]
 }
 
@@ -470,7 +470,7 @@ function noteBullet(text: string, indent = ''): string {
 }
 
 function summaryPath(scope: Scope): string {
-  return styleText('dim', normalizedPath(scope.root))
+  return styleText('dim', displayManagedPath(scope.root, scope.root))
 }
 
 function installSummary(scope: Scope, skills: string[]): string {
@@ -497,25 +497,23 @@ function uninstallSummary(
   scope: Scope,
   groups: InstallGroup[],
   removeData: Set<string>,
-  cleanupGroups: CleanupGroup[],
 ): string {
-  const cleanupSkills = new Set(cleanupGroups.map((group) => group.skill))
-  const showGeneratedDetail = removeData.size > 0
-  const lines = ['The following skills will be uninstalled:', '', summaryPath(scope), '']
-  for (const group of groups) {
-    lines.push(noteBullet(displaySkillName(group.skill)))
-    if (!showGeneratedDetail || !cleanupSkills.has(group.skill)) continue
-    lines.push(noteBullet('Skill/agent files: Remove', '  '))
-    lines.push(noteBullet(`Generated data: ${removeData.has(group.skill) ? 'Remove' : 'Keep'}`, '  '))
-  }
-  return lines.join('\n')
+  return [
+    'The following skills will be uninstalled:',
+    '',
+    summaryPath(scope),
+    '',
+    ...groups.map((group) => noteBullet(
+      `${displaySkillName(group.skill)} (${removeData.has(group.skill) ? 'installed files, generated data' : 'installed files'})`,
+    )),
+  ].join('\n')
 }
 
-function collisionSummary(collisions: InstallCollision[]): string {
+function collisionSummary(scope: Scope, collisions: InstallCollision[]): string {
   return [
     'The following existing paths conflict with files JLS needs to install. Continuing will remove or overwrite those exact paths and could cause permanent loss of data.',
     '',
-    ...collisions.map((collision) => noteBullet(normalizedPath(collision.path))),
+    ...collisions.map((collision) => noteBullet(displayManagedPath(scope.root, collision.path))),
   ].join('\n')
 }
 
@@ -599,11 +597,7 @@ function cleanupGroupsFor(scope: Scope, groups: InstallGroup[]): CleanupGroup[] 
     if (!manifest) continue
     const cleanups = detectGeneratedCleanup(scope.root, manifest)
     if (cleanups.length === 0) continue
-    result.push({
-      skill: group.skill,
-      description: [...new Set(cleanups.map((cleanup) => cleanup.description))].join('; '),
-      cleanups,
-    })
+    result.push({ skill: group.skill, cleanups })
   }
   return result
 }
@@ -812,7 +806,7 @@ async function installAtScope(
           }
           const collisions = [...collisionMap.values()]
           if (collisions.length > 0) {
-            prompts.note(collisionSummary(collisions), 'Collisions detected')
+            prompts.note(collisionSummary(scope, collisions), 'Collisions detected')
             prompts.log.warn(wrapLogMessage('See above. Installation has failed due to colliding files/paths. Would you like to continue with installation despite this collision?'))
             const destructiveProceed = await chooseConfirmation(state, `${prefix}.collision-confirm`, true)
             if (destructiveProceed === BACK_SIGNAL) continue instructionStep
@@ -944,14 +938,28 @@ async function uninstallAtScope(scope: Scope, state: WizardState, prefix: string
     cleanupStep:
     while (true) {
       let removeData = new Set<string>()
-      if (cleanupGroups.length > 0) {
+      if (cleanupGroups.length === 1) {
+        const cleanupGroup = cleanupGroups[0]
+        const dataSelection = await chooseOne(
+          state,
+          `${prefix}.generated-data.single`,
+          `The ${displaySkillName(cleanupGroup.skill)} skill has generated data separate from any skill or agent files that were installed. Would you like to also remove this data?`,
+          [
+            { value: 'yes', label: 'Yes' },
+            { value: 'no', label: 'No' },
+          ],
+          { allowBack: true, initialValue: 'yes' },
+        )
+        if (dataSelection === BACK_SIGNAL) continue skillStep
+        if (dataSelection === 'yes') removeData.add(cleanupGroup.skill)
+      } else if (cleanupGroups.length > 1) {
         const dataSelection = await chooseMany(
           state,
           `${prefix}.generated-data`,
-          'The following skills you selected have data generated beyond its installation. If you would like to retain any of this data, deselect the options below before continuing.',
+          'The following skills have generated data separate from any skill or agent files that were installed. Select which, if any, of this data you would also like to remove.',
           cleanupGroups.map((group) => ({
             value: group.skill,
-            label: `${displaySkillName(group.skill)} (${group.description})`,
+            label: displaySkillName(group.skill),
           })),
           { allowBack: true, required: false, initialValues: cleanupGroups.map((group) => group.skill) },
         )
@@ -959,7 +967,7 @@ async function uninstallAtScope(scope: Scope, state: WizardState, prefix: string
         removeData = new Set(dataSelection)
       }
 
-      prompts.note(uninstallSummary(scope, groups, removeData, cleanupGroups))
+      prompts.note(uninstallSummary(scope, groups, removeData))
       const proceed = await chooseConfirmation(state, `${prefix}.confirm`, true)
       if (proceed === BACK_SIGNAL) {
         if (cleanupGroups.length > 0) continue cleanupStep
