@@ -448,7 +448,7 @@ function noteBullet(text: string, indent = ''): string {
 }
 
 function summaryPath(scope: Scope): string {
-  return styleText(['italic', 'dim'], normalizedPath(scope.root))
+  return styleText('dim', normalizedPath(scope.root))
 }
 
 function installSummary(scope: Scope, skills: string[]): string {
@@ -495,6 +495,27 @@ function collisionSummary(collisions: InstallCollision[]): string {
     '',
     ...collisions.map((collision) => noteBullet(normalizedPath(collision.path))),
   ].join('\n')
+}
+
+function wrapLogMessage(message: string): string {
+  const columns = typeof process.stdout.columns === 'number' && process.stdout.columns > 3
+    ? process.stdout.columns
+    : 80
+  const width = columns - 3
+  const words = message.trim().split(/\s+/)
+  const lines: string[] = []
+  let line = ''
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word
+    if (line && candidate.length > width) {
+      lines.push(line)
+      line = word
+    } else {
+      line = candidate
+    }
+  }
+  if (line) lines.push(line)
+  return lines.join('\n')
 }
 
 function installedVersions(group: InstallGroup): string[] {
@@ -773,7 +794,7 @@ async function installAtScope(
           const collisions = [...collisionMap.values()]
           if (collisions.length > 0) {
             prompts.note(collisionSummary(collisions), 'Collisions detected')
-            prompts.log.warn('See above. Installation has failed due to colliding directories/files. Would you like to continue with installation despite this collision?')
+            prompts.log.warn(wrapLogMessage('See above. Installation has failed due to colliding directories/files. Would you like to continue with installation despite this collision?'))
             const destructiveProceed = await chooseConfirmation(state, `${prefix}.collision-confirm`, true)
             if (destructiveProceed === BACK_SIGNAL) continue instructionStep
             removeInstallCollisions(collisions)
