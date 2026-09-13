@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const OWNERSHIP_MARKER = '.jls-owned.json'
@@ -104,14 +104,14 @@ export function cleanupRuntimeMetaRoot(scopeRoot: string): void {
   if (!existsSync(metaRoot) || !statSync(metaRoot).isDirectory()) return
   const entries = readdirSync(metaRoot)
   if (entries.length === 0) {
-    rmSync(metaRoot, { recursive: false, force: true })
+    rmdirSync(metaRoot)
     return
   }
   if (!runtimeRootOwned(scopeRoot)) return
   const remaining = entries.filter((entry) => entry !== OWNERSHIP_MARKER)
   if (remaining.length > 0) return
   rmSync(markerPath(metaRoot), { force: true })
-  rmSync(metaRoot, { recursive: false, force: true })
+  rmdirSync(metaRoot)
 }
 
 export function assertGeneratedDataOwnership(
