@@ -42,8 +42,18 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).not.toContain('if (required && selectable.length === 1) {')
   })
 
-  test('generated-data question matches the approved wording', () => {
-    expect(source).toContain('The following skills you selected have data generated beyond its installation. If you would like to retain any of this data, deselect the options below before continuing.')
+  test('generated-data removal uses a Yes-first binary decision for one skill and an all-selected multiselect for several', () => {
+    expect(source).toContain('The ${displaySkillName(cleanupGroup.skill)} skill has generated data separate from any skill or agent files that were installed. Would you like to also remove this data?')
+    expect(source).toContain("`${prefix}.generated-data.single`")
+    expect(source).toContain("{ value: 'yes', label: 'Yes' }")
+    expect(source).toContain("{ value: 'no', label: 'No' }")
+    expect(source).toContain("{ allowBack: true, initialValue: 'yes' }")
+    expect(source).toContain("if (dataSelection === 'yes') removeData.add(cleanupGroup.skill)")
+    expect(source).toContain('The following skills have generated data separate from any skill or agent files that were installed. Select which, if any, of this data you would also like to remove.')
+    expect(source).toContain('label: displaySkillName(group.skill)')
+    expect(source).toContain('{ allowBack: true, required: false, initialValues: cleanupGroups.map((group) => group.skill) }')
+    expect(source).not.toContain('label: `${displaySkillName(group.skill)} (${group.description})`')
+    expect(source).not.toContain('data generated beyond its installation')
   })
 
   test('instruction injection uses the requested plural wording and a skill-specific Yes No decision', () => {
@@ -120,9 +130,11 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).toContain("prompts.log.warn('No supported AI harnesses were detected.')")
   })
 
-  test('confirmation No and Backspace share the same result without changing the injection No decision', () => {
+  test('confirmation No and Backspace share the same result without changing direct Yes No choices', () => {
     expect(source).toContain("if (choice === BACK_SIGNAL || choice === 'no') return BACK_SIGNAL")
     expect(source).toContain("if (selected === 'yes') injectedSkills = [skill]")
+    expect(source).toContain("if (dataSelection === BACK_SIGNAL) continue skillStep")
+    expect(source).toContain("if (dataSelection === 'yes') removeData.add(cleanupGroup.skill)")
   })
 
   test('uses Clack path selection for custom scopes', () => {
@@ -131,27 +143,26 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).toContain('validate: validateCustomPath')
   })
 
-  test('all structured summaries normalize and dim paths without italicizing them, while dimming only bullet glyphs', () => {
-    expect(source).toContain("'The following skills will be installed:'")
-    expect(source).toContain("'The following skills will be updated:'")
-    expect(source).toContain("'The following skills will be uninstalled:'")
-    expect(source).toContain("return styleText('dim', normalizedPath(scope.root))")
-    expect(source).not.toContain("styleText(['italic', 'dim'], normalizedPath(scope.root))")
+  test('structured paths are localized to the selected management root while the selected root remains intact', () => {
+    expect(source).toContain("import { displayManagedPath } from './display-path'")
+    expect(source).toContain("return styleText('dim', displayManagedPath(scope.root, scope.root))")
+    expect(source).toContain('displayManagedPath(scope.root, collision.path)')
     expect(source).toContain("return `${indent}${styleText('dim', '•')} ${text}`")
-    expect(source).not.toContain("styleText('dim', `${indent}• ${text}`)")
+    expect(source).not.toContain("styleText(['italic', 'dim'], normalizedPath(scope.root))")
     expect(source).not.toContain('JLS Installer will install')
   })
 
-  test('uninstall summary stays flat unless generated data is actually selected for removal', () => {
-    expect(source).toContain('const showGeneratedDetail = removeData.size > 0')
-    expect(source).toContain('if (!showGeneratedDetail || !cleanupSkills.has(group.skill)) continue')
-    expect(source).toContain("lines.push(noteBullet('Skill/agent files: Remove', '  '))")
-    expect(source).toContain("Generated data: ${removeData.has(group.skill) ? 'Remove' : 'Keep'}")
+  test('uninstall summary is a flat per-skill installed-files/generated-data description', () => {
+    expect(source).toContain("`${displaySkillName(group.skill)} (${removeData.has(group.skill) ? 'installed files, generated data' : 'installed files'})`")
+    expect(source).not.toContain('Skill/agent files: Remove')
+    expect(source).not.toContain('Generated data: ${removeData.has(group.skill)')
+    expect(source).not.toContain('const showGeneratedDetail = removeData.size > 0')
   })
 
-  test('collisions are file-granular and warning wrapping leaves continuation guides to Clack', () => {
-    expect(source).toContain("prompts.note(collisionSummary(collisions), 'Collisions detected')")
+  test('collisions are file-granular, scope-localized, and warning wrapping leaves continuation guides to Clack', () => {
+    expect(source).toContain("prompts.note(collisionSummary(scope, collisions), 'Collisions detected')")
     expect(source).toContain('The following existing paths conflict with files JLS needs to install. Continuing will remove or overwrite those exact paths and could cause permanent loss of data.')
+    expect(source).toContain('displayManagedPath(scope.root, collision.path)')
     expect(source).toContain("prompts.log.warn(wrapLogMessage('See above. Installation has failed due to colliding files/paths. Would you like to continue with installation despite this collision?'))")
     expect(source).toContain('const width = columns - 3')
     expect(source).toContain("return lines.join('\\n')")
