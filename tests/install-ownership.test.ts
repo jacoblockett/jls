@@ -38,6 +38,19 @@ describe('installation ownership contract', () => {
     }
   })
 
+  test('an unowned empty .jls is preserved, while positively identified legacy ownership may be cleaned', () => {
+    const root = mkdtempSync(join(tmpdir(), 'jls-owner-'))
+    try {
+      mkdirSync(join(root, '.jls'))
+      cleanupRuntimeMetaRoot(root)
+      expect(existsSync(join(root, '.jls'))).toBe(true)
+      cleanupRuntimeMetaRoot(root, true)
+      expect(existsSync(join(root, '.jls'))).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   test('an owned runtime meta-directory with unrelated content is retained', () => {
     const root = mkdtempSync(join(tmpdir(), 'jls-owner-'))
     try {
@@ -92,7 +105,7 @@ describe('installation ownership contract', () => {
     expect(preflight).toBeGreaterThan(installStart)
     expect(destructiveReplace).toBeGreaterThan(preflight)
     expect(source).toContain('assertVacantOrOwned(dest, previous?.name === skill')
-    expect(source).toContain('cleanupRuntimeMetaRoot(group.scope.root)')
+    expect(source).toContain('cleanupRuntimeMetaRoot(group.scope.root, hadRuntime)')
     expect(source).not.toContain('rmSync(paths.skillRoot')
     expect(source).not.toContain('rmSync(parent)')
   })
