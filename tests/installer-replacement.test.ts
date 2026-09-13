@@ -50,6 +50,14 @@ describe('cross-platform installer replacement', () => {
     expect(implementation).not.toContain('detached: true')
   })
 
+  test('legacy timer-based installer replacement is no longer part of the updater', () => {
+    const updater = readFileSync(new URL('../src/installer-updater.ts', import.meta.url), 'utf8')
+    expect(updater).not.toContain('windowsReplacementCommand')
+    expect(updater).not.toContain('scheduleInstallerReplacement')
+    expect(updater).not.toContain('ping 127.0.0.1')
+    expect(updater).not.toContain('detached: true')
+  })
+
   test('Windows finalizer survives its Bun parent and replaces the installer', async () => {
     if (process.platform !== 'win32') return
 
