@@ -2,6 +2,7 @@ import { existsSync, rmSync, statSync } from 'node:fs'
 import { isAbsolute, join, normalize, relative, resolve } from 'node:path'
 import { platform } from 'node:os'
 import { spawnSync } from 'node:child_process'
+import { displayManagedPath } from './display-path'
 
 export type PathCleanupSpec = {
   kind: 'path'
@@ -201,7 +202,7 @@ export function removeGeneratedCleanup(
     for (const path of cleanup.paths ?? []) {
       const marker = join(path, cleanup.spec.marker)
       if (!existsSync(marker) || !statSync(marker).isFile()) {
-        throw new Error(`refusing to remove generated data whose identifying marker no longer exists: ${path}`)
+        throw new Error(`refusing to remove generated data whose identifying marker no longer exists: ${displayManagedPath(scopeRoot, path)}`)
       }
       rmSync(path, { recursive: true, force: true })
     }
