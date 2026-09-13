@@ -2,11 +2,13 @@ import { existsSync, rmSync, statSync } from 'node:fs'
 import { isAbsolute, join, normalize, relative, resolve } from 'node:path'
 import { platform } from 'node:os'
 import { spawnSync } from 'node:child_process'
+import { generatedDataOwned } from './install-ownership'
 
 export type PathCleanupSpec = {
   kind: 'path'
   path: string
   marker?: string
+  ownershipMarker?: string
   description: string
 }
 
@@ -90,10 +92,13 @@ export function cleanupSpecs(raw: RawSkillManifest): CleanupSpec[] {
       const marker = entry.marker === undefined
         ? undefined
         : containedRelativePath(entry.marker, `${raw.name} generated_data[${index}].marker`)
+      const ownershipMarker = entry.ownership_marker === undefined
+        ? undefined
+        : containedRelativePath(entry.ownership_marker, `${raw.name} generated_data[${index}].ownership_marker`)
       const description = typeof entry.description === 'string' && entry.description.trim()
         ? entry.description.trim()
         : `Generated data at ${path}`
-      specs.push({ kind: 'path', path, marker, description })
+      specs.push({ kind: 'path', path, marker, ownershipMarker, description })
     })
   }
 
@@ -180,7 +185,11 @@ export function detectGeneratedCleanup(
     if (spec.kind === 'path') {
       const path = cleanupPath(scopeRoot, spec)
       if (!existsSync(path)) continue
-      if (spec.marker && !existsSync(join(path, spec.marker))) continue
+      if (spec.ownershipMarker) {
+        if (!generatedDataOwned(path, manifest.name, spec.ownershipMarker)) continue
+      } else if (spec.marker && !existsSync(join(path, spec.marker))) {
+        continue
+      }
       result.push({ skill: manifest.name, description: spec.description, spec, paths: [path] })
       continue
     }
@@ -199,7 +208,15 @@ export function removeGeneratedCleanup(
   runner: Runner = defaultRunner,
 ): void {
   if (cleanup.spec.kind === 'path') {
-    for (const path of cleanup.paths ?? []) rmSync(path, { recursive: true, force: true })
+    for (const path of cleanup.paths ?? []) {
+      if (cleanup.spec.ownershipMarker && !generatedDataOwned(path, cleanup.skill, cleanup.spec.ownershipMarker)) {
+        throw new Error(`refusing to remove generated data whose JLS ownership contract no longer matches: ${path}`)
+      }
+      if (!cleanup.spec.ownershipMarker && cleanup.spec.marker && !existsSync(join(path, cleanup.spec.marker))) {
+        throw new Error(`refusing to remove generated data whose marker no longer exists: ${path}`)
+      }
+      rmSync(path, { recursive: true, force: true })
+    }
     return
   }
 
