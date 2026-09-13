@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { type ChildProcess, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, rmSync, statSync, watch, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, watch, writeFileSync } from 'node:fs'
 import { platform, tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 
@@ -35,6 +35,8 @@ function Save-Failure([string]$message) {
 }
 
 try {
+  # GetProcessById opens the live parent before READY is emitted. Because the parent refuses
+  # to exit before READY, the PID cannot be recycled between acquisition and the wait.
   $parent = [System.Diagnostics.Process]::GetProcessById($parentPid)
   [System.IO.File]::WriteAllText($readyFile, 'ready')
   $ready = $true
@@ -101,20 +103,16 @@ export function removeInstallerSynchronously(executable: string, dataRoot: strin
   }
 }
 
-function readFailure(path: string): string | undefined {
-  try {
-    return Bun.file(path).text()
-  } catch {
-    return undefined
-  }
-}
-
 async function waitForReady(child: ChildProcess, readyFile: string, errorFile: string): Promise<void> {
   const directory = dirname(readyFile)
   const readyName = basename(readyFile)
 
   await new Promise<void>((resolve, reject) => {
     let settled = false
+    const watcher = watch(directory, (_event, filename) => {
+      if (!filename || filename.toString() === readyName) checkReady()
+    })
+
     const finish = (error?: Error) => {
       if (settled) return
       settled = true
@@ -132,14 +130,11 @@ async function waitForReady(child: ChildProcess, readyFile: string, errorFile: s
       if (existsSync(readyFile)) return finish()
       let detail: string | undefined
       try {
-        if (existsSync(errorFile)) detail = Bun.file(errorFile).text() as unknown as string
+        if (existsSync(errorFile)) detail = readFileSync(errorFile, 'utf8').trim()
       } catch {}
       finish(new Error(detail || `self-uninstall finalizer exited before it was ready${signal ? ` (${signal})` : ` (exit ${code ?? 1})`}`))
     }
 
-    const watcher = watch(directory, (_event, filename) => {
-      if (!filename || filename.toString() === readyName) checkReady()
-    })
     child.once('error', onError)
     child.once('exit', onExit)
     checkReady()
@@ -186,11 +181,11 @@ export async function armWindowsSelfUninstall(executable: string, dataRoot: stri
   } catch (error) {
     let detail: string | undefined
     try {
-      if (existsSync(errorFile)) detail = await Bun.file(errorFile).text()
+      if (existsSync(errorFile)) detail = readFileSync(errorFile, 'utf8').trim()
     } catch {}
     rmSync(readyFile, { force: true })
     rmSync(errorFile, { force: true })
-    throw new Error(detail?.trim() || (error instanceof Error ? error.message : String(error)))
+    throw new Error(detail || (error instanceof Error ? error.message : String(error)))
   }
 
   // Once READY exists, the finalizer owns a live handle to this exact process and is blocked
