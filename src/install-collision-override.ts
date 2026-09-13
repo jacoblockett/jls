@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { homedir, platform } from 'node:os'
-import { basename, dirname, join, normalize, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
 import { HARNESS_ADAPTERS, harnessAdapter } from './harnesses'
 import {
   parseSkillPackageManifest,
@@ -154,8 +154,8 @@ function instructionPathCollides(path: string, skill: string): boolean {
 }
 
 function pathInside(root: string, path: string): boolean {
-  const rel = relative(root, path)
-  return rel === '' || (!rel.startsWith('..') && !resolve(rel).startsWith(resolve('..')))
+  const rel = relative(resolve(root), resolve(path))
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
 }
 
 function addBlockingContainers(
@@ -165,7 +165,7 @@ function addBlockingContainers(
 ): void {
   let current = dirname(filePath)
   const boundary = resolve(root)
-  while (pathInside(boundary, resolve(current))) {
+  while (pathInside(boundary, current)) {
     if (existsSync(current)) {
       if (!statSync(current).isDirectory()) add(current)
       break
