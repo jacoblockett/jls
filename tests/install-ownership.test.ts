@@ -86,11 +86,21 @@ describe('file-granular installation collision contract', () => {
     expect(source).not.toContain('rmSync(runtimeRoot, { recursive: true, force: true })')
   })
 
-  test('legacy marker names are cleanup-only and are never written', () => {
+  test('legacy marker names are validated cleanup-only state and are never written', () => {
     const source = readFileSync(new URL('../src/jls-v04-core.ts', import.meta.url), 'utf8')
-    expect(source).toContain("removeFile(join(runtimeMetaRoot(scope.root), '.jls-owned.json'))")
-    expect(source).not.toContain("writeFileSync(path, `${JSON.stringify(marker)}")")
+    expect(source).toContain("import { removeLegacyOwnershipMarker } from './legacy-ownership'")
+    expect(source).toContain("{ kind: 'runtime-root' }")
+    expect(source).toContain("{ kind: 'skill-runtime', skill: manifest.name }")
+    expect(source).toContain("{ kind: 'generated-data', skill: manifest.name }")
     expect(source).not.toContain('markRuntimeLayout(')
+  })
+
+  test('scope-local installed manifest is preferred over global cached fallback', () => {
+    const source = readFileSync(new URL('../src/jls-v04-core.ts', import.meta.url), 'utf8')
+    const local = source.indexOf('for (const group of discoverInstallations(scope))')
+    const fallback = source.indexOf('return cachedPackageManifest(skill)', local)
+    expect(local).toBeGreaterThan(-1)
+    expect(fallback).toBeGreaterThan(local)
   })
 
   test('same-directory atomic writes do not delete the destination before rename', () => {
