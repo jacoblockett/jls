@@ -8,11 +8,11 @@ export function containerAncestors(filePath: string, boundary: string): string[]
   if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return []
 
   const result: string[] = []
-  while (true) {
+  while (current !== root) {
     result.push(current)
-    if (current === root) return result
     current = dirname(current)
   }
+  return result
 }
 
 export function pruneEmptyContainers(paths: string[]): void {
