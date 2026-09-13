@@ -14,6 +14,10 @@ $dataRoot = $env:JLS_UNINSTALL_DATA_ROOT
 $readyFile = $env:JLS_UNINSTALL_READY_FILE
 $errorFile = $env:JLS_UNINSTALL_ERROR_FILE
 $ready = $false
+$failNode = [char]0x2716
+$guide = [char]0x2502
+$finalBranch = [char]0x2514
+$successNode = [char]0x25C7
 
 function Save-Failure([string]$message) {
   try {
@@ -27,10 +31,10 @@ function Save-Failure([string]$message) {
   } catch {}
   try { [System.IO.File]::WriteAllText($errorFile, $message) } catch {}
   if ($ready) {
-    [Console]::Error.WriteLine('✖  JLS could not be fully uninstalled.')
-    [Console]::Error.WriteLine('│')
-    [Console]::Error.WriteLine("│  $message")
-    [Console]::Error.WriteLine('└')
+    [Console]::Error.WriteLine($failNode.ToString() + '  JLS could not be fully uninstalled.')
+    [Console]::Error.WriteLine($guide.ToString())
+    [Console]::Error.WriteLine($guide.ToString() + '  ' + $message)
+    [Console]::Error.WriteLine($finalBranch.ToString())
   }
 }
 
@@ -59,8 +63,8 @@ try {
   }
 
   try { Remove-Item -LiteralPath $errorFile -Force -ErrorAction SilentlyContinue } catch {}
-  [Console]::Out.WriteLine('◇  Done.')
-  [Console]::Out.WriteLine('└')
+  [Console]::Out.WriteLine($successNode.ToString() + '  Done.')
+  [Console]::Out.WriteLine($finalBranch.ToString())
   exit 0
 } catch {
   $message = $_.Exception.Message
