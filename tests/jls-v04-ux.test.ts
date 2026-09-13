@@ -48,7 +48,7 @@ describe('0.4 installer wording and rendering contract', () => {
   test('harness picker uses the approved wording and defaults all feasible harnesses on', () => {
     expect(source).toContain("For which of the following AI harnesses would you like to install your selected skills? If you don't see your desired harness here, it is either undetected or unsupported.")
     expect(source).toContain('initialValues: enabledHarnesses')
-    expect(source).not.toContain('You can opt out of any of these if you like.')
+    expect(source).not.toContain('The following supported AI harnesses were detected. You can opt out of any of these if you like.')
   })
 
   test('single feasible choices and empty scopes skip redundant screens', () => {
