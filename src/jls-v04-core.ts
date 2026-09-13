@@ -30,15 +30,7 @@ import {
   type ReleaseManifest,
   type SkillPackageManifest,
 } from './installer-updater'
-import {
-  assertGeneratedDataOwnership,
-  assertRuntimeLayoutAvailable,
-  assertVacantOrOwned,
-  cleanupRuntimeMetaRoot,
-  markRuntimeLayout,
-  runtimeSkillOwned,
-  runtimeSkillRoot,
-} from './install-ownership'
+import { detectInstallCollisions } from './install-collision-override'
 import { renderResource } from './resource-render'
 import { compiledTarget } from './targets'
 import installerManifest from '../manifest.json'
@@ -158,6 +150,14 @@ function cachedManifestPath(name: string): string {
   return join(skillMetadataRoot(), `${name}.json`)
 }
 
+function runtimeMetaRoot(scopeRoot: string): string {
+  return join(scopeRoot, '.jls')
+}
+
+function runtimeSkillRoot(scopeRoot: string, skill: string): string {
+  return join(runtimeMetaRoot(scopeRoot), skill)
+}
+
 function resolveScope(raw: string): Scope {
   const value = raw.trim()
   if (value === 'user') return { kind: 'user', origin: 'global', identity: 'user', root: userHome() }
@@ -218,12 +218,16 @@ function copyPackageEntry(source: string, destination: string, tokens?: Record<s
   atomicWrite(destination, renderResource(bytes.toString('utf8'), tokens, destination))
 }
 
+function removeFile(path: string): void {
+  if (existsSync(path) && statSync(path).isFile()) rmSync(path, { force: true })
+}
+
 function managedMarkers(skill: string): { begin: string; end: string } {
   return { begin: `<!-- jls:begin ${skill} -->`, end: `<!-- jls:end ${skill} -->` }
 }
 
 function managedBlockPresent(path: string, skill: string): boolean {
-  if (!existsSync(path)) return false
+  if (!existsSync(path) || !statSync(path).isFile()) return false
   const { begin, end } = managedMarkers(skill)
   const current = readFileSync(path, 'utf8')
   return current.includes(begin) && current.includes(end)
@@ -256,7 +260,7 @@ function managedBlock(path: string, skill: string, fragment: string): void {
 }
 
 function removeManagedBlock(path: string, skill: string): void {
-  if (!existsSync(path)) return
+  if (!existsSync(path) || !statSync(path).isFile()) return
   assertManagedBlockWritable(path, skill)
   const { begin, end } = managedMarkers(skill)
   const current = readFileSync(path, 'utf8')
@@ -279,6 +283,17 @@ function installedPackageManifest(skillPath: string): Manifest | undefined {
   }
 }
 
+function cachedPackageManifest(skill: string): Manifest | undefined {
+  const path = cachedManifestPath(skill)
+  if (!existsSync(path) || !statSync(path).isFile()) return undefined
+  try {
+    const manifest = parseSkillPackageManifest(JSON.parse(readFileSync(path, 'utf8')))
+    return manifest.name === skill ? manifest : undefined
+  } catch {
+    return undefined
+  }
+}
+
 function harnessResourceTargets(manifest: Manifest, agent: string, scope: Scope): HarnessResourceTarget[] {
   const declared = manifest.harness_resources?.[agent] ?? {}
   const roots = agentPaths(agent, scope).resources
@@ -291,14 +306,25 @@ function harnessResourceTargets(manifest: Manifest, agent: string, scope: Scope)
   return targets
 }
 
+function skillFilesPresent(skillPath: string): boolean {
+  const manifest = installedPackageManifest(skillPath)
+  if (!manifest) return false
+  return manifest.skill_files.every((rel) => {
+    const path = join(skillPath, rel)
+    return existsSync(path) && statSync(path).isFile()
+  })
+}
+
 function harnessResourcesPresent(skillPath: string, agent: string, scope: Scope): boolean {
   const manifest = installedPackageManifest(skillPath)
   if (!manifest) return false
-  return harnessResourceTargets(manifest, agent, scope).every(({ destination }) => existsSync(destination))
+  return harnessResourceTargets(manifest, agent, scope).every(({ destination }) => (
+    existsSync(destination) && statSync(destination).isFile()
+  ))
 }
 
 function removeHarnessResources(manifest: Manifest, agent: string, scope: Scope): void {
-  for (const { destination } of harnessResourceTargets(manifest, agent, scope)) rmSync(destination, { force: true })
+  for (const { destination } of harnessResourceTargets(manifest, agent, scope)) removeFile(destination)
 }
 
 function installHarnessResources(
@@ -319,7 +345,7 @@ function discoverInstallations(scope: Scope): InstallGroup[] {
     if (!existsSync(paths.skillRoot) || !statSync(paths.skillRoot).isDirectory()) continue
     for (const entry of readdirSync(paths.skillRoot).sort()) {
       const skillPath = join(paths.skillRoot, entry)
-      if (!statSync(skillPath).isDirectory()) continue
+      if (!existsSync(skillPath) || !statSync(skillPath).isDirectory()) continue
       const manifest = installedPackageManifest(skillPath)
       if (!manifest || manifest.name !== entry) continue
       const key = `${manifest.name}\u0000${scope.identity}`
@@ -349,6 +375,56 @@ function runtimeCliPath(manifest: Manifest, scope: Scope): string {
   return join(runtimeSkillRoot(scope.root, manifest.name), 'bin', `${manifest.runtime_cli}${compiledTarget().executableSuffix}`)
 }
 
+function runtimeFiles(manifest: Manifest, scope: Scope): string[] {
+  if (!manifest.runtime) return []
+  const root = runtimeSkillRoot(scope.root, manifest.name)
+  return [
+    ...(manifest.runtime_cli ? [runtimeCliPath(manifest, scope)] : []),
+    ...(manifest.runtime_files ?? []).map((rel) => join(root, rel)),
+  ]
+}
+
+function previousManifestForSkill(scope: Scope, skill: string): Manifest | undefined {
+  const cached = cachedPackageManifest(skill)
+  if (cached) return cached
+  for (const group of discoverInstallations(scope)) {
+    if (group.skill !== skill) continue
+    for (const target of group.targets) {
+      const manifest = installedPackageManifest(target.skillPath)
+      if (manifest?.name === skill) return manifest
+    }
+  }
+  return undefined
+}
+
+function removeLegacyOwnershipMarkers(manifest: Manifest, scope: Scope): void {
+  removeFile(join(runtimeMetaRoot(scope.root), '.jls-owned.json'))
+  removeFile(join(runtimeSkillRoot(scope.root, manifest.name), '.jls-owned.json'))
+  for (const spec of manifest.generated_data ?? []) {
+    removeFile(join(scope.root, spec.path, '.jls-owned.json'))
+  }
+}
+
+function removeObsoleteRuntimeFiles(previous: Manifest | undefined, next: Manifest, scope: Scope): void {
+  if (!previous) return
+  const nextFiles = new Set(runtimeFiles(next, scope).map((path) => normalizedPath(resolve(path))))
+  for (const path of runtimeFiles(previous, scope)) {
+    if (!nextFiles.has(normalizedPath(resolve(path)))) removeFile(path)
+  }
+}
+
+function removeObsoleteSkillFiles(previous: Manifest, next: Manifest, destination: string): void {
+  const nextFiles = new Set(next.skill_files.map((rel) => normalizedPath(normalize(rel))))
+  for (const rel of previous.skill_files) {
+    if (!nextFiles.has(normalizedPath(normalize(rel)))) removeFile(join(destination, rel))
+  }
+}
+
+function removeSkillFiles(manifest: Manifest, destination: string): void {
+  for (const rel of manifest.skill_files) removeFile(join(destination, rel))
+  removeFile(join(destination, 'manifest.json'))
+}
+
 function renderInstructionFragment(pkg: DownloadedSkillPackage, cli?: string): string {
   const manifest = pkg.manifest
   if (!manifest.instruction_fragment) return ''
@@ -360,85 +436,21 @@ function renderInstructionFragment(pkg: DownloadedSkillPackage, cli?: string): s
   )
 }
 
-function runtimeOwnershipEvidence(scope: Scope, skill: string): { root: boolean; skill: boolean } {
-  const groups = discoverInstallations(scope)
-  let root = false
-  let ownedSkill = false
-  for (const group of groups) {
-    for (const target of group.targets) {
-      const manifest = installedPackageManifest(target.skillPath)
-      if (!manifest?.runtime) continue
-      root = true
-      if (group.skill === skill) ownedSkill = true
-    }
-  }
-  return { root, skill: ownedSkill }
-}
-
-function legacyGeneratedDataOwned(scope: Scope, skill: string, generatedPath: string): boolean {
-  const wanted = normalizedPath(resolve(generatedPath))
-  for (const group of discoverInstallations(scope)) {
-    if (group.skill !== skill) continue
-    for (const installed of group.targets) {
-      const manifest = installedPackageManifest(installed.skillPath)
-      if (!manifest || manifest.name !== skill) continue
-      for (const spec of manifest.generated_data ?? []) {
-        if (normalizedPath(resolve(scope.root, spec.path)) !== wanted || !spec.marker) continue
-        const marker = join(generatedPath, spec.marker)
-        if (existsSync(marker) && statSync(marker).isFile()) return true
-      }
-    }
-  }
-  return false
-}
-
 function assertInstallCollisions(pkg: DownloadedSkillPackage, scope: Scope, targets: InstallTarget[]): void {
-  const skill = pkg.manifest.name
-
-  if (pkg.manifest.runtime) {
-    const legacy = runtimeOwnershipEvidence(scope, skill)
-    assertRuntimeLayoutAvailable(scope.root, skill, legacy.root, legacy.skill)
-  }
-  assertGeneratedDataOwnership(
-    scope.root,
-    skill,
-    pkg.manifest.generated_data,
-    (target) => legacyGeneratedDataOwned(scope, skill, target),
-  )
-
-  for (const target of targets) {
-    const paths = agentPaths(target.agent, scope)
-    if (existsSync(paths.skillRoot) && !statSync(paths.skillRoot).isDirectory()) {
-      throw new Error(`skill root collides with an existing non-directory: ${paths.skillRoot}`)
-    }
-
-    const dest = join(paths.skillRoot, skill)
-    const previous = installedPackageManifest(dest)
-    assertVacantOrOwned(dest, previous?.name === skill, `${target.agent} skill path`)
-
-    const previouslyOwnedResources = new Set(
-      previous
-        ? harnessResourceTargets(previous, target.agent, scope).map(({ destination }) => normalizedPath(resolve(destination)))
-        : [],
-    )
-    for (const { destination } of harnessResourceTargets(pkg.manifest, target.agent, scope)) {
-      const parent = dirname(destination)
-      if (existsSync(parent) && !statSync(parent).isDirectory()) {
-        throw new Error(`${target.agent} resource root collides with an existing non-directory: ${parent}`)
-      }
-      assertVacantOrOwned(
-        destination,
-        previouslyOwnedResources.has(normalizedPath(resolve(destination))),
-        `${target.agent} harness resource`,
-      )
-    }
-
-    assertManagedBlockWritable(paths.instruction, skill)
-  }
+  const collisions = detectInstallCollisions(pkg, scope, targets.map((target) => target.agent))
+  if (collisions.length === 0) return
+  const paths = collisions.map((collision) => collision.path).join(', ')
+  throw new Error(`installation collides with existing file/path: ${paths}`)
 }
 
-function provisionRuntime(pkg: DownloadedSkillPackage, scope: Scope): { cli?: string } {
+function provisionRuntime(
+  pkg: DownloadedSkillPackage,
+  scope: Scope,
+  previous: Manifest | undefined,
+): { cli?: string } {
   const manifest = pkg.manifest
+  removeObsoleteRuntimeFiles(previous, manifest, scope)
+  removeLegacyOwnershipMarkers(previous ?? manifest, scope)
   if (!manifest.runtime) return {}
   if (manifest.runtime !== 'rust') throw new Error(`unsupported runtime "${manifest.runtime}"`)
   if (!manifest.runtime_cli) throw new Error(`${manifest.name} manifest is missing runtime_cli`)
@@ -446,7 +458,6 @@ function provisionRuntime(pkg: DownloadedSkillPackage, scope: Scope): { cli?: st
   const artifact = manifest.runtime_artifacts?.[target]
   if (!artifact) throw new Error(`${manifest.name} has no bundled runtime for ${target}`)
 
-  markRuntimeLayout(scope.root, manifest.name)
   const root = runtimeSkillRoot(scope.root, manifest.name)
   const cli = runtimeCliPath(manifest, scope)
   copyPackageEntry(join(pkg.root, artifact), cli)
@@ -466,8 +477,8 @@ function installTargets(
   action: 'install' | 'update',
 ): void {
   assertInstallCollisions(pkg, scope, targets)
-  cachePackageManifest(pkg)
-  const runtime = provisionRuntime(pkg, scope)
+  const previousPackage = previousManifestForSkill(scope, pkg.manifest.name)
+  const runtime = provisionRuntime(pkg, scope, previousPackage)
   const tokenName = pkg.manifest.cli_token || 'JL_SKILL_CLI'
   const tokens = runtime.cli ? { [`{{${tokenName}}}`]: normalize(runtime.cli) } : {}
   const fragment = renderInstructionFragment(pkg, runtime.cli)
@@ -476,8 +487,10 @@ function installTargets(
     const paths = agentPaths(target.agent, scope)
     const dest = join(paths.skillRoot, pkg.manifest.name)
     const previous = installedPackageManifest(dest)
-    if (previous) removeHarnessResources(previous, target.agent, scope)
-    rmSync(dest, { recursive: true, force: true })
+    if (previous) {
+      removeHarnessResources(previous, target.agent, scope)
+      removeObsoleteSkillFiles(previous, pkg.manifest, dest)
+    }
     mkdirSync(dest, { recursive: true })
     for (const rel of pkg.manifest.skill_files) copyPackageEntry(join(pkg.root, rel), join(dest, rel), tokens)
     copyPackageEntry(join(pkg.root, 'manifest.json'), join(dest, 'manifest.json'))
@@ -488,6 +501,9 @@ function installTargets(
     const verb = action === 'update' ? 'Updated' : 'Installed'
     console.log(`${verb} ${pkg.manifest.name} ${pkg.manifest.version} for ${target.agent} at ${dest}`)
   }
+
+  removeLegacyOwnershipMarkers(pkg.manifest, scope)
+  cachePackageManifest(pkg)
 }
 
 function configureInstruction(pkg: DownloadedSkillPackage, scope: Scope, target: InstallTargetState): void {
@@ -505,29 +521,27 @@ function configureInstruction(pkg: DownloadedSkillPackage, scope: Scope, target:
 }
 
 function uninstallGroup(group: InstallGroup): void {
-  let hadRuntime = false
+  let runtimeManifest: Manifest | undefined
   for (const target of group.targets) {
     const manifest = installedPackageManifest(target.skillPath)
     if (!manifest || manifest.name !== group.skill) {
-      throw new Error(`refusing to uninstall unowned skill path: ${target.skillPath}`)
+      throw new Error(`refusing to uninstall skill path without its matching manifest: ${target.skillPath}`)
     }
-    if (manifest.runtime) hadRuntime = true
+    if (manifest.runtime && !runtimeManifest) runtimeManifest = manifest
     removeHarnessResources(manifest, target.agent, group.scope)
-    rmSync(target.skillPath, { recursive: true, force: true })
+    removeSkillFiles(manifest, target.skillPath)
     removeManagedBlock(target.instructionPath, group.skill)
+    removeLegacyOwnershipMarkers(manifest, group.scope)
     console.log(`Uninstalled ${group.skill} for ${target.agent} from ${group.scope.root}`)
   }
 
   if (!discoverInstallations(group.scope).some((candidate) => candidate.skill === group.skill)) {
-    const runtimeRoot = runtimeSkillRoot(group.scope.root, group.skill)
-    if (existsSync(runtimeRoot)) {
-      if (!runtimeSkillOwned(group.scope.root, group.skill) && !hadRuntime) {
-        throw new Error(`refusing to remove unowned runtime path: ${runtimeRoot}`)
-      }
-      rmSync(runtimeRoot, { recursive: true, force: true })
+    const manifest = runtimeManifest ?? cachedPackageManifest(group.skill)
+    if (manifest) {
+      for (const path of runtimeFiles(manifest, group.scope)) removeFile(path)
+      removeLegacyOwnershipMarkers(manifest, group.scope)
     }
-    rmSync(cachedManifestPath(group.skill), { force: true })
-    cleanupRuntimeMetaRoot(group.scope.root, hadRuntime)
+    removeFile(cachedManifestPath(group.skill))
   }
 }
 
@@ -606,7 +620,10 @@ async function installCommand(args: string[]): Promise<number> {
 
   const requestedInstructions = Object.fromEntries(parsed.skills.map((skill) => [skill, parsed.instructions ?? false]))
   const installedTargets = discoverInstallations(scope).flatMap((group) => group.targets
-    .filter((target) => harnessResourcesPresent(target.skillPath, target.agent, scope))
+    .filter((target) => (
+      skillFilesPresent(target.skillPath)
+      && harnessResourcesPresent(target.skillPath, target.agent, scope)
+    ))
     .map((target) => ({
       skill: group.skill,
       agent: target.agent,
@@ -692,7 +709,6 @@ async function uninstallCommand(args: string[]): Promise<number> {
   const groups = matchingGroups(parsed, scope)
   if (groups.length === 0) throw new Error('no installations match uninstall filters')
   for (const group of groups) uninstallGroup(group)
-  cleanupRuntimeMetaRoot(scope.root)
   return 0
 }
 
