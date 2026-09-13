@@ -175,6 +175,10 @@ function instructionFooter(hasGuide: boolean, allowBack: boolean): string {
   return hasGuide ? `${line}\n${styleText('cyan', S_BAR_END)}` : line
 }
 
+function backHistory(hasGuide: boolean): string {
+  return `${hasGuide ? `${styleText('gray', S_BAR)}  ` : ''}${styleText('dim', 'Go back')}`
+}
+
 export function exclusiveMultiselect<Value>(
   opts: ExclusiveMultiselectOptions<Value>,
 ): Promise<Value[] | symbol> {
@@ -207,7 +211,7 @@ export function exclusiveMultiselect<Value>(
       const value = this.value ?? []
 
       if (this.state === 'submit') {
-        if (prompt.backRequested) return `${title}${hasGuide ? styleText('gray', S_BAR) : ''}`
+        if (prompt.backRequested) return `${title}${backHistory(hasGuide)}`
         const submitted = this.options
           .filter((option) => value.includes(option.value))
           .map((option) => optionText(option, 'submitted'))
