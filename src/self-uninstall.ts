@@ -167,7 +167,9 @@ export async function armWindowsSelfUninstall(executable: string, dataRoot: stri
   writeFileSync(finalizerFile, WINDOWS_FINALIZER, 'utf8')
 
   // Use -File rather than transporting the finalizer source through the Windows command line.
-  // The child signals READY only after it has opened the exact parent process and can wait on it.
+  // Do not detach the spawn: Bun's detached Windows child path can discard the argument
+  // contract. The PowerShell process still survives the JLS parent once READY is observed
+  // and child.unref() releases the parent event-loop reference.
   const child = spawn('powershell.exe', [
     '-NoLogo',
     '-NoProfile',
@@ -177,7 +179,6 @@ export async function armWindowsSelfUninstall(executable: string, dataRoot: stri
     '-File',
     finalizerFile,
   ], {
-    detached: true,
     stdio: ['ignore', 'inherit', 'inherit'],
     windowsHide: true,
     env: {
