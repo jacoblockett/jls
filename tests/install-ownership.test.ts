@@ -136,6 +136,12 @@ describe('installation ownership contract', () => {
     expect(source).not.toContain('rmSync(parent)')
   })
 
+  test('same-directory atomic writes do not delete the destination before rename', () => {
+    const source = readFileSync(new URL('../src/jls-v04-core.ts', import.meta.url), 'utf8')
+    expect(source).toContain('renameSync(tmp, path)')
+    expect(source).not.toContain("if (isWindows && existsSync(path)) rmSync(path, { force: true })")
+  })
+
   test('agent equals parsing closes both nested calls before the next branch', () => {
     const source = readFileSync(new URL('../src/jls-v04-core.ts', import.meta.url), 'utf8')
     expect(source).toContain("out.agents.push(arg.slice('--agent='.length))")
