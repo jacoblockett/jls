@@ -37,6 +37,11 @@ describe('0.4 installer wording and rendering contract', () => {
   const navigation = readFileSync(join(repo, 'src', 'nav-prompts.ts'), 'utf8')
   const multiselect = readFileSync(join(repo, 'src', 'exclusive-multiselect.ts'), 'utf8')
 
+  test('generic prompt helpers never auto-select a lone option', () => {
+    expect(source).not.toContain('if (enabled.length === 1) {')
+    expect(source).not.toContain('if (required && selectable.length === 1) {')
+  })
+
   test('generated-data question matches the approved wording', () => {
     expect(source).toContain('The following skills you selected have data generated beyond its installation. If you would like to retain any of this data, deselect the options below before continuing.')
   })
@@ -50,32 +55,50 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).not.toContain('You can opt out of any of these if you like.')
   })
 
-  test('harness picker uses the approved wording verbatim and defaults all feasible harnesses on', () => {
-    expect(source).toContain("For which of the following AI harnesses would you like to install your selected skills? If you don't see your desired harness here, it is either undetected or unsupported.")
-    expect(source).toContain('initialValues: enabledHarnesses')
-    expect(source).toContain('const harnessWasPrompted = enabledHarnesses.length > 1')
-    expect(source).toContain('selectedAgents = enabledHarnesses')
-    expect(source).not.toContain('The following supported AI harnesses were detected. You can opt out of any of these if you like.')
-  })
-
-  test('skill selection never inherits the one-feasible-choice shortcut', () => {
-    expect(source).not.toContain('if (required && selectable.length === 1) {')
+  test('install always presents the full skill catalog and marks only fully installed skills unavailable', () => {
+    expect(source).toContain('const skillItems: ChoiceItem[] = Object.keys(release.skills).sort().map((skill) => {')
+    expect(source).toContain('const installedEverywhere = detected.every((agent) => targetInstalled(scope, skill, agent.id))')
+    expect(source).toContain("disabledSuffix: installedEverywhere ? ' (installed)' : undefined")
     expect(source).toContain("noSkillsDetected ? 'No skills detected. Which skills would you like to install?' : 'Which skills would you like to install?'")
-    expect(source).toContain("'The following updates are available. Please select which you would like to install.'")
-    expect(source).toContain("'Which skills would you like to uninstall?'")
-    expect(source).toContain('const skillWasPrompted = true')
-    expect(source).toContain('const selectionWasPrompted = true')
-    expect(source).toContain("disabledSuffix: installedEverywhere ? ' (already installed)' : undefined")
+    expect(source).toContain("prompts.log.warn('No skills are available to install because all available skills are already installed.')")
   })
 
-  test('empty scopes still skip only the redundant action screen', () => {
+  test('disabled status text remains dim and outside the struck label', () => {
+    expect(multiselect).toContain("const suffix = option.disabledSuffix ? styleText('dim', option.disabledSuffix) : ''")
+    expect(multiselect).toContain("styleText(['strikethrough', 'gray'], label)}${description}${suffix}")
+    expect(multiselect).not.toContain("styleText(['strikethrough', 'gray'], `${label}${suffix}`)")
+  })
+
+  test('harness picker skips only when exactly one supported harness is detected', () => {
+    expect(source).toContain("For which of the following AI harnesses would you like to install your selected skills? If you don't see your desired harness here, it is either undetected or unsupported.")
+    expect(source).toContain('const harnessWasPrompted = detected.length > 1')
+    expect(source).toContain('initialValues: enabledHarnesses')
+    expect(source).toContain("disabledSuffix: alreadyInstalled ? ' (already installed)' : undefined")
+    expect(source).toContain('selectedAgents = enabledHarnesses')
+    expect(source).not.toContain('const harnessWasPrompted = enabledHarnesses.length > 1')
+  })
+
+  test('empty scopes skip only the redundant action screen and proceed to skill selection', () => {
     expect(source).toContain('if (!hasInstalled) {')
     expect(source).toContain('const result = await installAtScope(scope, state, `${prefix}.install`, true)')
   })
 
-  test('navigation backs through visible steps and records Go back as the history hint', () => {
-    expect(source).toContain('if (skillWasPrompted) continue skillStep')
-    expect(source).toContain('if (selectionWasPrompted) continue selectionStep')
+  test('single update uses binary confirmation while multiple updates use an all-off multiselect', () => {
+    expect(source).toContain('if (available.length === 1) {')
+    expect(source).toContain('Would you like to update the ${displaySkillName(group.skill)} skill (${updateStatus(group, availableVersions)})?')
+    expect(source).toContain("'The following updates are available. Please select which you would like to install.'")
+    expect(source).toContain('{ allowBack: true, initialValues: [] }')
+    expect(source).toContain("prompts.log.info('No updates were found.')")
+  })
+
+  test('single uninstall uses binary confirmation while multiple uninstalls use an all-off multiselect', () => {
+    expect(source).toContain('Would you like to uninstall the ${displaySkillName(group.skill)} skill?')
+    expect(source).toContain("'Which skills would you like to uninstall?'")
+    expect(source).toContain("prompts.log.warn('No installed skills were found.')")
+    expect(source).toContain("`${prefix}.single-confirm`")
+  })
+
+  test('navigation records Go back as the history hint', () => {
     expect(navigation).toContain("styleText('dim', 'Go back')")
     expect(navigation).toContain('if (prompt.backRequested) return `${title}${backHistory(hasGuide)}`')
     expect(multiselect).toContain("styleText('dim', 'Go back')")
@@ -95,10 +118,6 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).toContain('await prompts.path({')
     expect(source).toContain('directory: true')
     expect(source).toContain('validate: validateCustomPath')
-  })
-
-  test('installed skills carry an explicit already-installed suffix', () => {
-    expect(source).toContain("disabledSuffix: installedEverywhere ? ' (already installed)' : undefined")
   })
 
   test('all structured summaries normalize and dim paths without italicizing them, while dimming only bullet glyphs', () => {
