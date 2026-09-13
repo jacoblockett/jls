@@ -10,7 +10,7 @@ type OwnershipMarker = {
   skill?: string
 }
 
-type GeneratedDataSpec = {
+export type GeneratedDataOwnershipSpec = {
   path: string
   marker?: string
   ownership_marker?: string
@@ -129,7 +129,8 @@ export function cleanupRuntimeMetaRoot(scopeRoot: string, legacyOwned = false): 
 export function assertGeneratedDataOwnership(
   scopeRoot: string,
   skill: string,
-  specs: GeneratedDataSpec[] | undefined,
+  specs: GeneratedDataOwnershipSpec[] | undefined,
+  legacyOwned?: (target: string, spec: GeneratedDataOwnershipSpec) => boolean,
 ): void {
   for (const spec of specs ?? []) {
     const target = join(scopeRoot, spec.path)
@@ -138,7 +139,12 @@ export function assertGeneratedDataOwnership(
       throw new Error(`${skill} generated-data path collides with an existing non-directory: ${target}`)
     }
     if (spec.ownership_marker) {
-      if (!generatedDataOwned(target, skill, spec.ownership_marker)) {
+      const ownershipPath = join(target, spec.ownership_marker)
+      if (existsSync(ownershipPath)) {
+        if (!generatedDataOwned(target, skill, spec.ownership_marker)) {
+          throw new Error(`${skill} generated-data path carries an invalid JLS ownership contract: ${target}`)
+        }
+      } else if (!legacyOwned?.(target, spec)) {
         throw new Error(`${skill} generated-data path already exists but does not carry its JLS ownership contract: ${target}`)
       }
       continue
