@@ -3,172 +3,94 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  assertGeneratedDataOwnership,
-  assertRuntimeLayoutAvailable,
-  cleanupRuntimeMetaRoot,
-  markRuntimeLayout,
-  runtimeRootOwned,
-  runtimeSkillOwned,
-} from '../src/install-ownership'
-import {
   detectInstallCollisions,
   removeInstallCollisions,
 } from '../src/install-collision-override'
 
-describe('installation ownership contract', () => {
-  test('a pre-existing unowned .jls directory is a collision', () => {
-    const root = mkdtempSync(join(tmpdir(), 'jls-owner-'))
+function runtimePackage(root = ''): any {
+  return {
+    manifest: {
+      format: 1,
+      name: 'map',
+      version: '0.4.0',
+      min_installer: '0.1.0',
+      description: 'test',
+      skill_files: ['SKILL.md'],
+      runtime: 'rust',
+      runtime_cli: 'map',
+      runtime_files: ['schema.surql'],
+    },
+    root,
+    cleanup() {},
+  }
+}
+
+describe('file-granular installation collision contract', () => {
+  test('pre-existing runtime directories are containers, not collisions', () => {
+    const root = mkdtempSync(join(tmpdir(), 'jls-files-'))
     try {
-      mkdirSync(join(root, '.jls'))
-      expect(() => assertRuntimeLayoutAvailable(root, 'map')).toThrow('not owned by JLS')
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  test('an explicit destructive override can clear the exact empty .jls collision', () => {
-    const root = mkdtempSync(join(tmpdir(), 'jls-owner-'))
-    try {
-      const collisionPath = join(root, '.jls')
-      mkdirSync(collisionPath)
-      const pkg = {
-        manifest: {
-          format: 1,
-          name: 'map',
-          version: '0.4.0',
-          min_installer: '0.1.0',
-          description: 'test',
-          skill_files: ['SKILL.md'],
-          runtime: 'rust',
-        },
-        root: '',
-        cleanup() {},
-      } as any
-      const scope = { kind: 'project', origin: 'custom', identity: root, root } as const
-
-      const collisions = detectInstallCollisions(pkg, scope, [])
-      expect(collisions.map((collision) => collision.path)).toEqual([collisionPath])
-      expect(existsSync(collisionPath)).toBe(true)
-
-      removeInstallCollisions(collisions)
-      expect(existsSync(collisionPath)).toBe(false)
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  test('runtime ownership is explicit and removes only an empty JLS meta-directory', () => {
-    const root = mkdtempSync(join(tmpdir(), 'jls-owner-'))
-    try {
-      assertRuntimeLayoutAvailable(root, 'map')
-      markRuntimeLayout(root, 'map')
-      expect(runtimeRootOwned(root)).toBe(true)
-      expect(runtimeSkillOwned(root, 'map')).toBe(true)
-
-      rmSync(join(root, '.jls', 'map'), { recursive: true, force: true })
-      cleanupRuntimeMetaRoot(root)
-      expect(existsSync(join(root, '.jls'))).toBe(false)
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  test('an unowned empty .jls is preserved, while positively identified legacy ownership may be cleaned', () => {
-    const root = mkdtempSync(join(tmpdir(), 'jls-owner-'))
-    try {
-      mkdirSync(join(root, '.jls'))
-      cleanupRuntimeMetaRoot(root)
-      expect(existsSync(join(root, '.jls'))).toBe(true)
-      cleanupRuntimeMetaRoot(root, true)
-      expect(existsSync(join(root, '.jls'))).toBe(false)
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  test('an owned runtime meta-directory with unrelated content is retained', () => {
-    const root = mkdtempSync(join(tmpdir(), 'jls-owner-'))
-    try {
-      markRuntimeLayout(root, 'map')
-      rmSync(join(root, '.jls', 'map'), { recursive: true, force: true })
+      mkdirSync(join(root, '.jls', 'map', 'bin'), { recursive: true })
       writeFileSync(join(root, '.jls', 'unrelated.txt'), 'keep')
-      cleanupRuntimeMetaRoot(root)
-      expect(existsSync(join(root, '.jls', 'unrelated.txt'))).toBe(true)
+      const scope = { kind: 'project', origin: 'custom', identity: root, root } as const
+      expect(detectInstallCollisions(runtimePackage(), scope, [])).toEqual([])
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
   })
 
-  test('generated-data collisions require the exact manifest-declared JLS ownership contract', () => {
-    const root = mkdtempSync(join(tmpdir(), 'jls-owner-'))
+  test('an exact runtime filename collision is detected without condemning its directory', () => {
+    const root = mkdtempSync(join(tmpdir(), 'jls-files-'))
     try {
-      const generated = join(root, '.map')
-      mkdirSync(generated)
-      writeFileSync(join(generated, 'project.json'), '{}')
-      const specs = [{
-        path: '.map',
-        marker: 'project.json',
-        ownership_marker: '.jls-owned.json',
-      }]
-
-      expect(() => assertGeneratedDataOwnership(root, 'map', specs)).toThrow('does not carry its JLS ownership contract')
-      writeFileSync(join(generated, '.jls-owned.json'), JSON.stringify({
-        format: 1,
-        owner: 'jls',
-        kind: 'generated-data',
-        skill: 'other',
-      }))
-      expect(() => assertGeneratedDataOwnership(root, 'map', specs)).toThrow('invalid JLS ownership contract')
-
-      writeFileSync(join(generated, '.jls-owned.json'), JSON.stringify({
-        format: 1,
-        owner: 'jls',
-        kind: 'generated-data',
-        skill: 'map',
-      }))
-      expect(() => assertGeneratedDataOwnership(root, 'map', specs)).not.toThrow()
+      const bin = join(root, '.jls', 'map', 'bin')
+      mkdirSync(bin, { recursive: true })
+      const executable = process.platform === 'win32' ? join(bin, 'map.exe') : join(bin, 'map')
+      writeFileSync(executable, 'foreign')
+      const scope = { kind: 'project', origin: 'custom', identity: root, root } as const
+      const collisions = detectInstallCollisions(runtimePackage(), scope, [])
+      expect(collisions.map((collision) => collision.path)).toContain(executable)
+      expect(collisions.map((collision) => collision.path)).not.toContain(join(root, '.jls'))
+      expect(collisions.map((collision) => collision.path)).not.toContain(join(root, '.jls', 'map'))
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
   })
 
-  test('legacy generated-data ownership may bridge a missing new marker but never override an invalid marker', () => {
-    const root = mkdtempSync(join(tmpdir(), 'jls-owner-'))
+  test('destructive override removes only the exact collided path and preserves siblings', () => {
+    const root = mkdtempSync(join(tmpdir(), 'jls-files-'))
     try {
-      const generated = join(root, '.map')
-      mkdirSync(generated)
-      writeFileSync(join(generated, 'project.json'), '{}')
-      const specs = [{
-        path: '.map',
-        marker: 'project.json',
-        ownership_marker: '.jls-owned.json',
-      }]
-
-      expect(() => assertGeneratedDataOwnership(root, 'map', specs, () => true)).not.toThrow()
-      writeFileSync(join(generated, '.jls-owned.json'), JSON.stringify({
-        format: 1,
-        owner: 'jls',
-        kind: 'generated-data',
-        skill: 'other',
-      }))
-      expect(() => assertGeneratedDataOwnership(root, 'map', specs, () => true)).toThrow('invalid JLS ownership contract')
+      const bin = join(root, '.jls', 'map', 'bin')
+      mkdirSync(bin, { recursive: true })
+      const executable = process.platform === 'win32' ? join(bin, 'map.exe') : join(bin, 'map')
+      const sibling = join(bin, 'keep.txt')
+      writeFileSync(executable, 'foreign')
+      writeFileSync(sibling, 'keep')
+      const scope = { kind: 'project', origin: 'custom', identity: root, root } as const
+      const collisions = detectInstallCollisions(runtimePackage(), scope, [])
+      removeInstallCollisions(collisions)
+      expect(existsSync(executable)).toBe(false)
+      expect(existsSync(sibling)).toBe(true)
+      expect(existsSync(bin)).toBe(true)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
   })
 
-  test('lifecycle preflights ownership before destructive replacement and only cleans JLS meta roots', () => {
+  test('lifecycle never recursively replaces or removes skill/runtime directories', () => {
     const source = readFileSync(new URL('../src/jls-v04-core.ts', import.meta.url), 'utf8')
-    const installStart = source.indexOf('function installTargets(')
-    const preflight = source.indexOf('assertInstallCollisions(pkg, scope, targets)', installStart)
-    const destructiveReplace = source.indexOf('rmSync(dest, { recursive: true, force: true })', installStart)
-    expect(preflight).toBeGreaterThan(installStart)
-    expect(destructiveReplace).toBeGreaterThan(preflight)
-    expect(source).toContain('assertVacantOrOwned(dest, previous?.name === skill')
-    expect(source).toContain('legacyGeneratedDataOwned(scope, skill, target)')
-    expect(source).toContain('cleanupRuntimeMetaRoot(group.scope.root, hadRuntime)')
-    expect(source).not.toContain('rmSync(paths.skillRoot')
-    expect(source).not.toContain('rmSync(parent)')
+    expect(source).toContain('const collisions = detectInstallCollisions(pkg, scope, targets.map((target) => target.agent))')
+    expect(source).toContain('removeObsoleteSkillFiles(previous, pkg.manifest, dest)')
+    expect(source).toContain('removeSkillFiles(manifest, target.skillPath)')
+    expect(source).toContain('for (const path of runtimeFiles(manifest, group.scope)) removeFile(path)')
+    expect(source).not.toContain('rmSync(dest, { recursive: true, force: true })')
+    expect(source).not.toContain('rmSync(target.skillPath, { recursive: true, force: true })')
+    expect(source).not.toContain('rmSync(runtimeRoot, { recursive: true, force: true })')
+  })
+
+  test('legacy marker names are cleanup-only and are never written', () => {
+    const source = readFileSync(new URL('../src/jls-v04-core.ts', import.meta.url), 'utf8')
+    expect(source).toContain("removeFile(join(runtimeMetaRoot(scope.root), '.jls-owned.json'))")
+    expect(source).not.toContain("writeFileSync(path, `${JSON.stringify(marker)}")")
+    expect(source).not.toContain('markRuntimeLayout(')
   })
 
   test('same-directory atomic writes do not delete the destination before rename', () => {
