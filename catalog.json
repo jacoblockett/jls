@@ -3,7 +3,7 @@
   "skills": {
     "map": {
       "manifest_url": "https://github.com/jacoblockett/jls-map/releases/latest/download/manifest.json",
-      "description": "Durable local graph of user intent, questions, decisions, ideas, facts, dependencies, and recovery state."
+      "description": "Durable intent graph for decisions and goals"
     },
     "tasks": {
       "manifest_url": "https://github.com/jacoblockett/jls-tasks/releases/latest/download/manifest.json",
