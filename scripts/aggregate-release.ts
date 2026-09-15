@@ -28,7 +28,7 @@ type Fragment = {
   skills: Record<string, SkillReference>
 }
 
-type Catalog = { format: 1; skills: Record<string, SkillReference> }
+type Catalog = { skills: Record<string, SkillReference> }
 
 export type AggregateOptions = {
   inputRoot: string
@@ -64,10 +64,10 @@ export function catalogSkillReferences(skills: Record<string, unknown>): Record<
 
 function readCatalog(): Catalog {
   const raw = JSON.parse(readFileSync(join(repo, 'catalog.json'), 'utf8')) as Record<string, unknown>
-  if (raw.format !== 1 || !raw.skills || typeof raw.skills !== 'object' || Array.isArray(raw.skills)) {
+  if (!raw.skills || typeof raw.skills !== 'object' || Array.isArray(raw.skills)) {
     throw new Error('invalid catalog.json')
   }
-  return { format: 1, skills: catalogSkillReferences(raw.skills as Record<string, unknown>) }
+  return { skills: catalogSkillReferences(raw.skills as Record<string, unknown>) }
 }
 
 function assertArtifact(
