@@ -8,6 +8,7 @@ import {
   compareVersions,
   downloadSkillPackage,
   fetchStableReleaseManifest,
+  isSkillCompatible,
   parseReleaseManifest,
   parseSkillPackageManifest,
   parseSkillReleaseManifest,
@@ -32,7 +33,6 @@ function sha256(data: Uint8Array | string): string {
 
 function releaseIndex(installerVersion = '0.7.0') {
   return {
-    format: 3,
     installer: {
       version: installerVersion,
       artifacts: {
@@ -50,12 +50,11 @@ function releaseIndex(installerVersion = '0.7.0') {
   }
 }
 
-function skillRelease(version = '1.2.3', sha = '1'.repeat(64)) {
+function skillRelease(version = '1.2.3', sha = '1'.repeat(64), minInstaller = '0.7.0') {
   return {
-    format: 1,
     name: 'example-skill',
     version,
-    min_installer: '0.7.0',
+    min_installer: minInstaller,
     description: 'Example skill',
     dependencies: [{
       name: 'Example CLI',
@@ -96,10 +95,13 @@ describe('release metadata', () => {
 
   test('JLS release manifest contains installer artifacts and external skill references', () => {
     const parsed = parseReleaseManifest(releaseIndex())
-    expect(parsed.format).toBe(3)
     expect(parsed.installer.version).toBe('0.7.0')
     expect(parsed.skills['example-skill'].manifest_url).toBe('https://fixture.invalid/example-skill-manifest.json')
-    expect(() => parseReleaseManifest({ ...releaseIndex(), format: 2 })).toThrow()
+  })
+
+  test('legacy extra manifest metadata does not block current manifests', () => {
+    expect(parseReleaseManifest({ ...releaseIndex(), format: 3 }).installer.version).toBe('0.7.0')
+    expect(parseSkillReleaseManifest('example-skill', { ...skillRelease(), format: 1 }).version).toBe('1.2.3')
   })
 
   test('external skill manifest profile metadata round-trips with compatibility and artifacts', () => {
@@ -117,7 +119,6 @@ describe('release metadata', () => {
     })
     expect(released.artifacts['windows-x64']?.url).toEndWith('/example-skill-windows-x64.zip')
     expect(() => parseSkillReleaseManifest('other', skillRelease())).toThrow()
-    expect(() => parseSkillReleaseManifest('example-skill', { ...skillRelease(), format: 2 })).toThrow()
   })
 
   test('dependency detection metadata requires at least one non-empty command or path array', () => {
@@ -139,10 +140,28 @@ describe('release metadata', () => {
     })).toThrow()
   })
 
+  test('stable release discovery omits skills above installer compatibility', async () => {
+    const compatible = await fetchStableReleaseManifest(
+      'https://fixture.invalid/manifest.json',
+      fixtureFetcher(releaseIndex(), skillRelease('1.2.3', '1'.repeat(64), '0.4.0')),
+      '0.4.0',
+    )
+    expect(compatible?.skills['example-skill']?.version).toBe('1.2.3')
+
+    const incompatible = await fetchStableReleaseManifest(
+      'https://fixture.invalid/manifest.json',
+      fixtureFetcher(releaseIndex(), skillRelease('1.2.3', '1'.repeat(64), '0.4.1')),
+      '0.4.0',
+    )
+    expect(incompatible?.skills['example-skill']).toBeUndefined()
+    expect(isSkillCompatible('0.4.0', { min_installer: '0.4.1' })).toBe(false)
+  })
+
   test('stable release fetch resolves referenced skill manifests', async () => {
     const resolved = await fetchStableReleaseManifest(
       'https://fixture.invalid/manifest.json',
       fixtureFetcher(releaseIndex()),
+      '0.7.0',
     )
     expect(resolved?.skills['example-skill'].version).toBe('1.2.3')
     expect(resolved?.skills['example-skill'].description).toBe('Example skill')
@@ -152,6 +171,7 @@ describe('release metadata', () => {
     const resolved = await fetchStableReleaseManifest(
       'https://fixture.invalid/manifest.json',
       fixtureFetcher(releaseIndex(), null),
+      '0.7.0',
     )
     expect(resolved?.skills).toEqual({})
   })
@@ -187,7 +207,6 @@ describe('release metadata', () => {
 describe('skill package contract', () => {
   test('package manifest validation remains installer-owned and skill-agnostic', () => {
     const parsed = parseSkillPackageManifest({
-      format: 1,
       name: 'example-skill',
       version: '1.2.3',
       min_installer: '0.7.0',
@@ -215,7 +234,6 @@ describe('skill package contract', () => {
       marker: 'project.json',
     })
     expect(() => parseSkillPackageManifest({
-      format: 1,
       name: 'example-skill',
       version: '1.2.3',
       min_installer: '0.7.0',
@@ -226,7 +244,6 @@ describe('skill package contract', () => {
 
   test('legacy ownership_marker fields are ignored rather than becoming runtime ownership state', () => {
     const parsed = parseSkillPackageManifest({
-      format: 1,
       name: 'example-skill',
       version: '1.2.3',
       min_installer: '0.7.0',
@@ -237,12 +254,23 @@ describe('skill package contract', () => {
     expect(parsed.generated_data?.[0]).toEqual({ path: '.example', marker: 'project.json' })
   })
 
+  test('package parser accepts a legacy extra format field without retaining it', () => {
+    const parsed = parseSkillPackageManifest({
+      format: 1,
+      name: 'example-skill',
+      version: '1.2.3',
+      min_installer: '0.7.0',
+      description: 'Example',
+      skill_files: ['SKILL.md'],
+    })
+    expect('format' in parsed).toBe(false)
+  })
+
   test('download verifies and extracts a referenced package', async () => {
     const root = reset('package')
     const packageRoot = join(root, 'package')
     mkdirSync(packageRoot, { recursive: true })
     const packageManifest = {
-      format: 1,
       name: 'example-skill',
       version: '1.2.3',
       min_installer: '0.7.0',
