@@ -20,7 +20,7 @@ if (!hostMatchesTarget(buildTarget)) {
 
 type SkillReference = { manifest_url: string }
 type Catalog = { skills: Record<string, SkillReference> }
-type InstallerManifest = { format: 1; name: 'jls'; version: string }
+type InstallerManifest = { name: 'jls'; version: string; compatibility_version: string }
 
 function sha256(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
@@ -47,15 +47,17 @@ function readCatalog(): Catalog {
 
 function readInstallerManifest(): InstallerManifest {
   const raw = JSON.parse(readFileSync(join(repo, 'manifest.json'), 'utf8')) as Record<string, unknown>
-  if (raw.format !== 1) throw new Error('installer manifest format must be 1')
   if (raw.name !== 'jls') throw new Error('installer manifest name must be jls')
   if (typeof raw.version !== 'string' || !semver.test(raw.version)) {
     throw new Error(`manifest.json version must be plain semver: ${String(raw.version)}`)
   }
-  return { format: 1, name: 'jls', version: raw.version }
+  if (typeof raw.compatibility_version !== 'string' || !semver.test(raw.compatibility_version)) {
+    throw new Error(`manifest.json compatibility_version must be plain semver: ${String(raw.compatibility_version)}`)
+  }
+  return { name: 'jls', version: raw.version, compatibility_version: raw.compatibility_version }
 }
 
-const installerVersion = readInstallerManifest().version
+const installerManifest = readInstallerManifest()
 const installerName = installerAssetName(buildTarget)
 const output = join(out, installerName)
 rmSync(output, { force: true })
@@ -84,9 +86,9 @@ const releaseBase = `https://github.com/jacoblockett/jls/releases/download/${rel
 const catalog = readCatalog()
 
 const releaseManifest = {
-  format: 3,
   installer: {
-    version: installerVersion,
+    version: installerManifest.version,
+    compatibility_version: installerManifest.compatibility_version,
     artifacts: {
       [buildTarget.key]: {
         url: `${releaseBase}/${installerName}`,
