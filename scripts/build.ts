@@ -19,7 +19,7 @@ if (!hostMatchesTarget(buildTarget)) {
 }
 
 type SkillReference = { manifest_url: string }
-type Catalog = { format: 1; skills: Record<string, SkillReference> }
+type Catalog = { skills: Record<string, SkillReference> }
 type InstallerManifest = { format: 1; name: 'jls'; version: string }
 
 function sha256(path: string): string {
@@ -28,7 +28,6 @@ function sha256(path: string): string {
 
 function readCatalog(): Catalog {
   const raw = JSON.parse(readFileSync(join(repo, 'catalog.json'), 'utf8')) as Record<string, unknown>
-  if (raw.format !== 1) throw new Error('catalog format must be 1')
   if (!raw.skills || typeof raw.skills !== 'object' || Array.isArray(raw.skills)) {
     throw new Error('catalog skills must be an object')
   }
@@ -43,7 +42,7 @@ function readCatalog(): Catalog {
     if (parsed.protocol !== 'https:') throw new Error(`${name} manifest_url must use HTTPS`)
     skills[name] = { manifest_url: manifestUrl }
   }
-  return { format: 1, skills }
+  return { skills }
 }
 
 function readInstallerManifest(): InstallerManifest {
