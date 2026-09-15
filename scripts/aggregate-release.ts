@@ -23,8 +23,7 @@ const sha256Pattern = /^[a-f0-9]{64}$/
 type Artifact = { url: string; sha256: string }
 type SkillReference = { manifest_url: string }
 type Fragment = {
-  format: number
-  installer: { version: string; artifacts: Record<string, Artifact> }
+  installer: { version: string; compatibility_version: string; artifacts: Record<string, Artifact> }
   skills: Record<string, SkillReference>
 }
 
@@ -88,10 +87,12 @@ function assertArtifact(
 function readFragment(path: string, target: TargetKey, catalog: Catalog): Fragment {
   if (!existsSync(path)) throw new Error(`missing ${target} manifest fragment: ${path}`)
   const fragment = JSON.parse(readFileSync(path, 'utf8')) as Fragment
-  if (fragment.format !== 3) throw new Error(`${target} manifest fragment must use format 3`)
   if (!fragment.installer || typeof fragment.installer !== 'object') throw new Error(`${target} fragment is missing installer metadata`)
   if (typeof fragment.installer.version !== 'string' || !semver.test(fragment.installer.version)) {
     throw new Error(`${target} fragment has invalid installer version`)
+  }
+  if (typeof fragment.installer.compatibility_version !== 'string' || !semver.test(fragment.installer.compatibility_version)) {
+    throw new Error(`${target} fragment has invalid installer compatibility version`)
   }
   if (!fragment.installer.artifacts || typeof fragment.installer.artifacts !== 'object') {
     throw new Error(`${target} fragment is missing installer artifacts`)
@@ -110,6 +111,7 @@ export function aggregateRelease({ inputRoot, outputRoot, releaseTag }: Aggregat
   const fragments = new Map<TargetKey, { root: string; manifest: Fragment }>()
 
   let installerVersion: string | undefined
+  let compatibilityVersion: string | undefined
   for (const key of TARGET_KEYS) {
     const targetRoot = join(inputRoot, `target-${key}`)
     if (!existsSync(targetRoot) || !statSync(targetRoot).isDirectory()) {
@@ -120,10 +122,14 @@ export function aggregateRelease({ inputRoot, outputRoot, releaseTag }: Aggregat
     else if (manifest.installer.version !== installerVersion) {
       throw new Error(`${key} installer version ${manifest.installer.version} does not match ${installerVersion}`)
     }
+    if (compatibilityVersion === undefined) compatibilityVersion = manifest.installer.compatibility_version
+    else if (manifest.installer.compatibility_version !== compatibilityVersion) {
+      throw new Error(`${key} installer compatibility version ${manifest.installer.compatibility_version} does not match ${compatibilityVersion}`)
+    }
     fragments.set(key, { root: targetRoot, manifest })
   }
 
-  if (!installerVersion) throw new Error('no installer version was aggregated')
+  if (!installerVersion || !compatibilityVersion) throw new Error('no installer metadata was aggregated')
   rmSync(outputRoot, { recursive: true, force: true })
   mkdirSync(outputRoot, { recursive: true })
 
@@ -143,9 +149,9 @@ export function aggregateRelease({ inputRoot, outputRoot, releaseTag }: Aggregat
 
   const output = join(outputRoot, 'manifest.json')
   writeFileSync(output, `${JSON.stringify({
-    format: 3,
     installer: {
       version: installerVersion,
+      compatibility_version: compatibilityVersion,
       artifacts: installerArtifacts,
     },
     skills: catalog.skills,
