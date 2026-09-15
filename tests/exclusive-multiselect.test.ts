@@ -94,4 +94,18 @@ describe('installer option presentation', () => {
       expect(navigation).not.toContain(glyph)
     }
   })
+
+  test('disabled options suppress descriptions while preserving status suffixes', () => {
+    const repo = resolve(import.meta.dir, '..')
+    const multiselect = readFileSync(join(repo, 'src', 'exclusive-multiselect.ts'), 'utf8')
+    expect(multiselect).toContain("const description = state === 'disabled'")
+    expect(multiselect).toContain("? ''")
+    expect(multiselect).toContain("styleText(['strikethrough', 'gray'], label)}${description}${suffix}")
+  })
+
+  test('Map picker description is concise catalog metadata', () => {
+    const repo = resolve(import.meta.dir, '..')
+    const catalog = JSON.parse(readFileSync(join(repo, 'catalog.json'), 'utf8'))
+    expect(catalog.skills.map.description).toBe('Durable intent graph for decisions and goals')
+  })
 })
