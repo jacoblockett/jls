@@ -83,6 +83,24 @@ describe('0.4 installer wording and rendering contract', () => {
     expect(source).toContain("prompts.log.warn('No skills are available to install because all available skills are already installed.')")
   })
 
+  test('skill descriptions come from skill-owned release manifests rather than the installer catalog', () => {
+    expect(source).toContain('function skillDescription(release: ReleaseManifest, name: string): string | undefined')
+    expect(source).toContain('return release.skills[name]?.description')
+    expect(source).toContain('description: skillDescription(release, skill)')
+    expect(source).not.toContain("import catalog from '../catalog.json'")
+    expect(source).not.toContain('skillCatalog')
+  })
+
+  test('missing dependencies use one generic advisory acknowledgment before package preparation', () => {
+    expect(source).toContain("import { missingDependenciesText, missingSkillDependencies } from './skill-dependencies'")
+    expect(source).toContain("prompts.note(missingDependenciesText(missing), 'Missing dependencies')")
+    expect(source).toContain('const dependenciesAccepted = await acknowledgeMissingDependencies(')
+    expect(source).toContain("`${prefix}.dependencies`")
+    expect(source).toContain('if (dependenciesAccepted === BACK_SIGNAL) {')
+    expect(source.indexOf('const dependenciesAccepted = await acknowledgeMissingDependencies('))
+      .toBeLessThan(source.indexOf("spinner.start('Preparing selected skills')"))
+  })
+
   test('disabled status text remains dim and outside the struck label', () => {
     expect(multiselect).toContain("const suffix = option.disabledSuffix ? styleText('dim', option.disabledSuffix) : ''")
     expect(multiselect).toContain("styleText(['strikethrough', 'gray'], label)}${description}${suffix}")
