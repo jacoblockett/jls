@@ -29,10 +29,10 @@ import {
   type InstallCollision,
 } from './install-collision-override'
 import { displayManagedPath } from './display-path'
+import { missingDependenciesText, missingSkillDependencies } from './skill-dependencies'
 import { prepareInstallerSelfUninstall } from './self-uninstall'
 import { main as lifecycleMain } from './jls-v04-core'
 import installerManifest from '../manifest.json'
-import catalog from '../catalog.json'
 
 const VERSION = installerManifest.version
 const isWindows = platform() === 'win32'
@@ -87,15 +87,9 @@ type WizardState = {
 
 type NavResult<T> = T | typeof BACK_SIGNAL
 
-type CatalogSkill = {
-  manifest_url: string
-  description?: string
-}
-
 type LifecycleAction = 'install' | 'update' | 'uninstall'
 
 const agentCatalog: HarnessAdapter[] = HARNESS_ADAPTERS
-const skillCatalog = catalog.skills as Record<string, CatalogSkill>
 
 function newWizardState(): WizardState {
   return { shown: false, steps: new Map() }
@@ -412,8 +406,8 @@ function displaySkillName(name: string): string {
   return name ? `${name[0].toUpperCase()}${name.slice(1)}` : name
 }
 
-function skillDescription(name: string): string | undefined {
-  return skillCatalog[name]?.description
+function skillDescription(release: ReleaseManifest, name: string): string | undefined {
+  return release.skills[name]?.description
 }
 
 function humanList(values: string[]): string {
@@ -436,6 +430,19 @@ async function fetchRelease(state: WizardState, message: string): Promise<Releas
   } finally {
     spinner.clear()
   }
+}
+
+async function acknowledgeMissingDependencies(
+  state: WizardState,
+  stepId: string,
+  release: ReleaseManifest,
+  skills: string[],
+  scope: Scope,
+): Promise<true | typeof BACK_SIGNAL> {
+  const missing = missingSkillDependencies(skills, release.skills, scope.root)
+  if (missing.length === 0) return true
+  prompts.note(missingDependenciesText(missing), 'Missing dependencies')
+  return chooseConfirmation(state, stepId)
 }
 
 function instructionFiles(agents: string[], scope: Scope): string[] {
@@ -681,7 +688,7 @@ async function installAtScope(
       return {
         value: skill,
         label: displaySkillName(skill),
-        description: skillDescription(skill),
+        description: skillDescription(release, skill),
         disabled: installedEverywhere,
         disabledSuffix: installedEverywhere ? ' (installed)' : undefined,
       }
@@ -731,6 +738,18 @@ async function installAtScope(
         selectedAgents = enabledHarnesses
       }
 
+      const dependenciesAccepted = await acknowledgeMissingDependencies(
+        state,
+        `${prefix}.dependencies`,
+        release,
+        selectedSkills,
+        scope,
+      )
+      if (dependenciesAccepted === BACK_SIGNAL) {
+        if (harnessWasPrompted) continue harnessStep
+        continue skillStep
+      }
+
       const packages = new Map<string, Awaited<ReturnType<typeof import('./installer-updater')['downloadSkillPackage']>>>()
       const spinner = prompts.spinner({ withGuide: false })
       spinner.start('Preparing selected skills')
@@ -774,7 +793,7 @@ async function installAtScope(
                 capable.map((skill) => ({
                   value: skill,
                   label: displaySkillName(skill),
-                  description: skillDescription(skill),
+                  description: skillDescription(release, skill),
                 })),
                 { allowBack: true, required: false, initialValues: capable },
               )
