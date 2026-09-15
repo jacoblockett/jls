@@ -149,11 +149,15 @@ function optionText<Value>(
   state: 'inactive' | 'active' | 'selected' | 'active-selected' | 'submitted' | 'cancelled' | 'disabled',
 ): string {
   const label = option.label
+  // Disabled catalog entries are status-only: descriptions are useful while
+  // choosing an enabled option, but become visual noise once it is unavailable.
+  const description = state === 'disabled'
+    ? ''
+    : option.description ? ` ${styleText('dim', `(${option.description})`)}` : ''
   if (state === 'disabled') {
     const suffix = option.disabledSuffix ? styleText('dim', option.disabledSuffix) : ''
-    return `${styleText('gray', S_CHECKBOX_INACTIVE)} ${styleText(['strikethrough', 'gray'], label)}${suffix}`
+    return `${styleText('gray', S_CHECKBOX_INACTIVE)} ${styleText(['strikethrough', 'gray'], label)}${description}${suffix}`
   }
-  const description = option.description ? ` ${styleText('dim', `(${option.description})`)}` : ''
   if (state === 'active') return `${styleText('cyan', S_CHECKBOX_ACTIVE)} ${label}${description}`
   if (state === 'selected') return `${styleText('green', S_CHECKBOX_SELECTED)} ${styleText('dim', label)}`
   if (state === 'active-selected') return `${styleText('green', S_CHECKBOX_SELECTED)} ${label}${description}`
