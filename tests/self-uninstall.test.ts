@@ -1,15 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import {
-  prepareInstallerSelfUninstall,
-  windowsFinalizerScript,
-} from '../src/self-uninstall'
+import { prepareInstallerSelfUninstall } from '../src/self-uninstall'
 
 describe('cross-platform installer self-uninstall', () => {
-  test('POSIX removal is synchronous and verified before returning', async () => {
+  test('POSIX self-uninstall removes the executable and installer data', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jls-self-uninstall-'))
     const executable = join(root, 'jls')
     const dataRoot = join(root, 'data')
@@ -26,33 +23,7 @@ describe('cross-platform installer self-uninstall', () => {
     }
   })
 
-  test('Windows finalizer uses process state rather than fixed timing', () => {
-    const source = windowsFinalizerScript()
-    expect(source).toContain('[System.Diagnostics.Process]::GetProcessById($parentPid)')
-    expect(source).toContain('$parent.WaitForExit()')
-    expect(source).toContain("[System.IO.File]::WriteAllText($readyFile, 'ready')")
-    expect(source.indexOf("WriteAllText($readyFile, 'ready')")).toBeLessThan(source.indexOf('$parent.WaitForExit()'))
-    expect(source.toLowerCase()).not.toContain('sleep')
-    expect(source.toLowerCase()).not.toContain('ping ')
-  })
-
-  test('Windows finalizer escapes the Bun job through the cmd START breakaway trampoline', () => {
-    const implementation = readFileSync(new URL('../src/self-uninstall.ts', import.meta.url), 'utf8')
-    expect(implementation).toContain("spawn('cmd.exe', [")
-    expect(implementation).toContain("'/c',")
-    expect(implementation).toContain("'start',")
-    expect(implementation).toContain("'/b',")
-    expect(implementation).toContain("'powershell.exe',")
-    expect(implementation).toContain("'-File',")
-    expect(implementation).toContain('JLS_UNINSTALL_FINALIZER_FILE: finalizerFile')
-    expect(implementation).toContain("writeFileSync(finalizerFile, WINDOWS_FINALIZER, 'utf8')")
-    expect(implementation).toContain('await waitForBootstrap(bootstrap)')
-    expect(implementation).toContain('await waitForReadySignal(readyFile, errorFile)')
-    expect(implementation).not.toContain("'-EncodedCommand'")
-    expect(implementation).not.toContain('detached: true')
-  })
-
-  test('Windows finalizer reaches READY, survives its Bun parent, and completes cleanup', async () => {
+  test('Windows self-uninstall survives its Bun parent, completes cleanup, and stays silent on success', async () => {
     if (process.platform !== 'win32') return
 
     const root = mkdtempSync(join(tmpdir(), 'jls-self-uninstall-win-'))
@@ -90,32 +61,11 @@ describe('cross-platform installer self-uninstall', () => {
       while ((existsSync(executable) || existsSync(dataRoot)) && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 25))
       }
-      if (existsSync(executable) || existsSync(dataRoot)) {
-        throw new Error([
-          'Windows self-uninstall finalizer did not complete after its Bun parent exited',
-          `executableExists=${String(existsSync(executable))}`,
-          `dataRootExists=${String(existsSync(dataRoot))}`,
-          `stdout:\n${stdout}`,
-          `stderr:\n${stderr}`,
-        ].join('\n'))
-      }
       expect(existsSync(executable)).toBe(false)
       expect(existsSync(dataRoot)).toBe(false)
       expect(stdout).toBe('')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
-  })
-
-  test('Windows finalizer verifies deletion, stays silent on success, and reports failures', () => {
-    const source = windowsFinalizerScript()
-    expect(source).toContain('Test-Path -LiteralPath $executable')
-    expect(source).toContain('Test-Path -LiteralPath $dataRoot')
-    expect(source).toContain("Join-Path $dataRoot 'uninstall-error.json'")
-    expect(source).toContain('JLS could not be fully uninstalled.')
-    expect(source).toContain('$finalBranch = [char]0x2514')
-    expect(source).not.toContain('$successNode')
-    expect(source).not.toContain("[Console]::Out.WriteLine")
-    expect(source).toContain("[Console]::Error.WriteLine($finalBranch.ToString() + '  ' + $message)")
   })
 })

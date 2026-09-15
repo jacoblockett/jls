@@ -144,7 +144,7 @@ export class ExclusiveMultiSelectPrompt<Value> extends Prompt<Value[]> {
   }
 }
 
-function optionText<Value>(
+export function optionText<Value>(
   option: ExclusiveOption<Value>,
   state: 'inactive' | 'active' | 'selected' | 'active-selected' | 'submitted' | 'cancelled' | 'disabled',
 ): string {

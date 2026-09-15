@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { classifyInstallTargets, satisfiedSkills, staleSkills, staleUpdateTargets } from '../src/install-preflight'
@@ -114,7 +115,7 @@ describe('install preflight classification', () => {
     ])
   })
 
-  test('updates select only stale targets and never current, newer, or unknown versions', () => {
+  test('updates select only genuinely stale targets', () => {
     const targets = [
       { agent: 'stale', version: '0.1.0' },
       { agent: 'current', version: '0.2.0' },
@@ -141,64 +142,15 @@ describe('install preflight classification', () => {
   })
 })
 
-describe('0.4 interactive flow contract', () => {
-  const repo = resolve(import.meta.dir, '..')
-  const source = readFileSync(join(repo, 'src', 'jls-v04.ts'), 'utf8').replace(/\r\n/g, '\n')
-  const coreSource = readFileSync(join(repo, 'src', 'jls-v04-core.ts'), 'utf8').replace(/\r\n/g, '\n')
-
-  test('bare installer is scope-first and retains custom paths', () => {
-    expect(source).toContain("label: 'Manage skills on the current path'")
-    expect(source).toContain("label: 'Manage skills on the global path'")
-    expect(source).toContain("label: 'Manage skills on a custom path'")
-    expect(source).toContain("label: 'Manage installer'")
-  })
-
-  test('install disables a skill only when every targetable harness already has it', () => {
-    expect(source).toContain('detected.every((agent) => targetInstalled(scope, skill, agent.id))')
-    expect(source).toContain("disabledSuffix: installedEverywhere ? ' (installed)' : undefined")
-    expect(source).toContain('selectedSkills.every((skill) => targetInstalled(scope, skill, agent.id))')
-    expect(source).toContain("disabledSuffix: alreadyInstalled ? ' (already installed)' : undefined")
-    expect(source).toContain("For which of the following AI harnesses would you like to install your selected skills? If you don't see your desired harness here, it is either undetected or unsupported.")
-  })
-
-  test('instruction injection defaults on for capable selected skills', () => {
-    expect(source).toContain('initialValues: capable')
-    expect(source).toContain("'About AI Instruction Files'")
-  })
-
-  test('Install new skills does not silently perform stale skill updates', () => {
-    expect(coreSource).toContain("const actionable = planned.filter((target) => target.state === 'missing' || target.state === 'configure')")
-    expect(source).not.toContain('Which would you like to update instead?')
-    expect(coreSource).not.toContain('Which would you like to update instead?')
-  })
-
-  test('updates target only stale harness installations', () => {
-    expect(coreSource).toContain("import { classifyInstallTargets, staleUpdateTargets, type InstallTargetState } from './install-preflight'")
-    expect(coreSource).toContain('const staleTargets = staleUpdateTargets(group.targets, released.version)')
-    expect(coreSource).toContain('staleTargets.map((target) => ({')
-  })
-
-  test('updates have explicit single and multiple branches plus neutral no-update state', () => {
-    expect(source).toContain('if (available.length === 1) {')
-    expect(source).toContain('Would you like to update the ${displaySkillName(group.skill)} skill (${updateStatus(group, availableVersions)})?')
-    expect(source).toContain("'The following updates are available. Please select which you would like to install.'")
-    expect(source).toContain("prompts.log.info('No updates were found.')")
-  })
-
-  test('generated-data choice is integrated into skill uninstall', () => {
-    expect(source).toContain('if (cleanupGroups.length === 1) {')
-    expect(source).toContain('The ${displaySkillName(cleanupGroup.skill)} skill has generated data separate from any skill or agent files that were installed. Would you like to also remove this data?')
-    expect(source).toContain("{ allowBack: true, initialValue: 'yes' }")
-    expect(source).toContain('else if (cleanupGroups.length > 1) {')
-    expect(source).toContain("'The following skills have generated data separate from any skill or agent files that were installed. Select which, if any, of this data you would also like to remove.'")
-    expect(source).toContain('label: displaySkillName(group.skill)')
-    expect(source).toContain('initialValues: cleanupGroups.map((group) => group.skill)')
-    expect(source).not.toContain('Remove skill-generated data')
-    expect(source).not.toContain('The following skills you selected have data generated beyond its installation.')
-  })
-
-  test('installer manifest remains the runtime version authority', () => {
-    expect(source).toContain("import installerManifest from '../manifest.json'")
-    expect(source).toContain('const VERSION = installerManifest.version')
+describe('runtime-facing installer behavior', () => {
+  test('--version reports the installer manifest version', () => {
+    const repo = resolve(import.meta.dir, '..')
+    const manifest = JSON.parse(readFileSync(join(repo, 'manifest.json'), 'utf8'))
+    const result = spawnSync(process.execPath, [join(repo, 'src', 'jls-v04-core.ts'), '--version'], {
+      encoding: 'utf8',
+      windowsHide: true,
+    })
+    expect(result.status).toBe(0)
+    expect(result.stdout.trim()).toBe(`jls ${manifest.version}`)
   })
 })

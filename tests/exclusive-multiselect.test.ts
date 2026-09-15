@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { stripVTControlCharacters } from 'node:util'
 import {
   ExclusiveMultiSelectPrompt,
   applyExclusiveToggle,
+  optionText,
   type ExclusiveOption,
 } from '../src/exclusive-multiselect'
 
@@ -23,7 +23,7 @@ function prompt(initialValues: string[] = [], cursorAt?: string): ExclusiveMulti
   })
 }
 
-describe('exclusive multiselect keyboard policy', () => {
+describe('exclusive multiselect behavior', () => {
   test('space toggles the highlighted ordinary option live before submit', () => {
     const p = prompt()
     p.emit('cursor', 'space')
@@ -65,47 +65,32 @@ describe('exclusive multiselect keyboard policy', () => {
     const p = prompt([], 'claude')
     expect(p.cursor).toBe(1)
   })
-})
 
-describe('installer option presentation', () => {
-  test('installer source does not use Clack option hints, pseudo-options, or inline confirmations', () => {
-    const repo = resolve(import.meta.dir, '..')
-    const source = readFileSync(join(repo, 'src', 'jls.ts'), 'utf8')
-    expect(source).not.toContain('hint:')
-    expect(source).not.toContain("label: 'All of the above'")
-    expect(source).not.toContain("label: 'Go back'")
-    expect(source).not.toContain("label: 'Cancel & exit'")
-    expect(source).not.toContain('prompts.confirm(')
+  test('a lone enabled option is not silently selected', () => {
+    const p = new ExclusiveMultiSelectPrompt<string>({
+      options: [{ value: 'only', label: 'Only option' }],
+      initialValues: [],
+      allowBack: true,
+      render() { return '' },
+    })
+    expect(p.value).toEqual([])
+    p.emit('cursor', 'space')
+    expect(p.value).toEqual(['only'])
   })
 
-  test('custom prompt footers use explicit key names except for navigation arrows', () => {
-    const repo = resolve(import.meta.dir, '..')
-    const multiselect = readFileSync(join(repo, 'src', 'exclusive-multiselect.ts'), 'utf8')
-    const navigation = readFileSync(join(repo, 'src', 'nav-prompts.ts'), 'utf8')
-
-    for (const text of ['↑/↓', 'Enter', 'Backspace', 'Esc']) {
-      expect(multiselect).toContain(text)
-      expect(navigation).toContain(text)
+  test('disabled options hide descriptions but retain user-relevant status', () => {
+    const option = {
+      value: 'map',
+      label: 'Map',
+      description: 'extra details',
+      disabledSuffix: ' (installed)',
     }
-    for (const text of ['Space', 'A']) expect(multiselect).toContain(text)
+    const disabled = stripVTControlCharacters(optionText({ ...option, disabled: true }, 'disabled'))
+    expect(disabled).toContain('Map')
+    expect(disabled).toContain('(installed)')
+    expect(disabled).not.toContain('extra details')
 
-    for (const glyph of ['␣', '↵', '←', '⎋', '⌫', '␛']) {
-      expect(multiselect).not.toContain(glyph)
-      expect(navigation).not.toContain(glyph)
-    }
-  })
-
-  test('disabled options suppress descriptions while preserving status suffixes', () => {
-    const repo = resolve(import.meta.dir, '..')
-    const multiselect = readFileSync(join(repo, 'src', 'exclusive-multiselect.ts'), 'utf8')
-    expect(multiselect).toContain("const description = state === 'disabled'")
-    expect(multiselect).toContain("? ''")
-    expect(multiselect).toContain("styleText(['strikethrough', 'gray'], label)}${description}${suffix}")
-  })
-
-  test('Map picker description is concise catalog metadata', () => {
-    const repo = resolve(import.meta.dir, '..')
-    const catalog = JSON.parse(readFileSync(join(repo, 'catalog.json'), 'utf8'))
-    expect(catalog.skills.map.description).toBe('Durable intent graph for decisions and goals')
+    const active = stripVTControlCharacters(optionText(option, 'active'))
+    expect(active).toContain('extra details')
   })
 })

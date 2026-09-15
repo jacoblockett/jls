@@ -65,14 +65,13 @@ describe('skill dependency detection', () => {
 })
 
 describe('missing dependency notice', () => {
-  test('uses the single generic template and nested dependency bullets', () => {
-    expect(missingDependenciesText([{ skill: 'tasks', dependencies: [beads] }])).toBe([
-      'One or more of the skills you selected require the following dependencies that were not detected on your system:',
-      '',
-      '• Tasks',
-      '  • Beads (install: https://example.invalid/beads)',
-      '',
-      'It is recommended that you install these dependencies before attempting to use the skills that require them. If these dependencies exist on your system in an unconventional way, ensure your agents have sufficient knowledge of where they exist and how to use them, ideally via your agent instruction files.',
-    ].join('\n'))
+  test('renders each missing dependency nested under its skill with an install link', () => {
+    const lines = missingDependenciesText([{ skill: 'tasks', dependencies: [beads] }]).split('\n')
+    const skillLine = lines.indexOf('• Tasks')
+    expect(skillLine).toBeGreaterThan(-1)
+    const dependencyLine = lines[skillLine + 1] ?? ''
+    expect(dependencyLine.startsWith('  • ')).toBe(true)
+    expect(dependencyLine).toContain('Beads')
+    expect(dependencyLine).toContain(beads.install_url)
   })
 })

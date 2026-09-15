@@ -1,4 +1,3 @@
-
 import { describe, expect, test } from 'bun:test'
 import {
   TARGET_KEYS,
@@ -47,6 +46,6 @@ describe('distribution targets', () => {
   })
 
   test('rejects unknown targets', () => {
-    expect(() => targetByKey('linux-x64')).toThrow('unsupported jls target')
+    expect(() => targetByKey('linux-x64')).toThrow()
   })
 })

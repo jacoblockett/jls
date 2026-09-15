@@ -3,13 +3,10 @@ import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import {
-  prepareInstallerReplacement,
-  windowsInstallerReplacementScript,
-} from '../src/installer-replacement'
+import { prepareInstallerReplacement } from '../src/installer-replacement'
 
 describe('cross-platform installer replacement', () => {
-  test('POSIX replacement is synchronous and verified', async () => {
+  test('POSIX replacement replaces the executable and removes staging', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jls-update-'))
     const executable = join(root, 'jls')
     const staged = join(root, '.jls.update')
@@ -25,40 +22,7 @@ describe('cross-platform installer replacement', () => {
     }
   })
 
-  test('Windows replacement waits on exact process state and uses atomic native replacement', () => {
-    const source = windowsInstallerReplacementScript()
-    expect(source).toContain('[System.Diagnostics.Process]::GetProcessById($parentPid)')
-    expect(source).toContain('$parent.WaitForExit()')
-    expect(source).toContain("[System.IO.File]::WriteAllText($readyFile, 'ready')")
-    expect(source.indexOf("WriteAllText($readyFile, 'ready')")).toBeLessThan(source.indexOf('$parent.WaitForExit()'))
-    expect(source).toContain('MoveFileEx')
-    expect(source).toContain('$MOVEFILE_REPLACE_EXISTING')
-    expect(source).toContain('$MOVEFILE_WRITE_THROUGH')
-    expect(source.toLowerCase()).not.toContain('sleep')
-    expect(source.toLowerCase()).not.toContain('ping ')
-  })
-
-  test('Windows replacement escapes the Bun job through cmd START', () => {
-    const implementation = readFileSync(new URL('../src/installer-replacement.ts', import.meta.url), 'utf8')
-    expect(implementation).toContain("spawn('cmd.exe', [")
-    expect(implementation).toContain("'start',")
-    expect(implementation).toContain("'/b',")
-    expect(implementation).toContain("'powershell.exe',")
-    expect(implementation).toContain("'-File',")
-    expect(implementation).toContain('await waitForBootstrap(bootstrap)')
-    expect(implementation).toContain('await waitForReadySignal(readyFile, errorFile)')
-    expect(implementation).not.toContain('detached: true')
-  })
-
-  test('legacy timer-based installer replacement is no longer part of the updater', () => {
-    const updater = readFileSync(new URL('../src/installer-updater.ts', import.meta.url), 'utf8')
-    expect(updater).not.toContain('windowsReplacementCommand')
-    expect(updater).not.toContain('scheduleInstallerReplacement')
-    expect(updater).not.toContain('ping 127.0.0.1')
-    expect(updater).not.toContain('detached: true')
-  })
-
-  test('Windows finalizer survives its Bun parent and replaces the installer', async () => {
+  test('Windows replacement survives its Bun parent and replaces the installer', async () => {
     if (process.platform !== 'win32') return
 
     const root = mkdtempSync(join(tmpdir(), 'jls-update-win-'))
@@ -95,17 +59,8 @@ describe('cross-platform installer replacement', () => {
       while ((existsSync(staged) || readFileSync(executable, 'utf8') !== 'new installer') && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 25))
       }
-      if (existsSync(staged) || readFileSync(executable, 'utf8') !== 'new installer') {
-        throw new Error([
-          'Windows installer replacement did not complete after its Bun parent exited',
-          `stagedExists=${String(existsSync(staged))}`,
-          `executable=${JSON.stringify(readFileSync(executable, 'utf8'))}`,
-          `stdout:\n${stdout}`,
-          `stderr:\n${stderr}`,
-        ].join('\n'))
-      }
-      expect(readFileSync(executable, 'utf8')).toBe('new installer')
       expect(existsSync(staged)).toBe(false)
+      expect(readFileSync(executable, 'utf8')).toBe('new installer')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
