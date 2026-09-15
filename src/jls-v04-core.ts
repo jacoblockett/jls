@@ -25,6 +25,7 @@ import {
   compareVersions,
   downloadSkillPackage,
   fetchStableReleaseManifest,
+  INSTALLER_COMPATIBILITY_VERSION,
   parseSkillPackageManifest,
   type DownloadedSkillPackage,
   type ReleaseManifest,
@@ -637,8 +638,8 @@ function ensureReleasedAndCompatible(release: ReleaseManifest, skills: string[])
   for (const skill of skills) {
     const released = release.skills[skill]
     if (!released) throw new Error(`stable release does not contain ${skill}`)
-    if (compareVersions(VERSION, released.min_installer) < 0) {
-      throw new Error(`${skill} ${released.version} requires JLS ${released.min_installer} or newer; running ${VERSION}`)
+    if (compareVersions(INSTALLER_COMPATIBILITY_VERSION, released.min_installer) < 0) {
+      throw new Error(`${skill} ${released.version} requires JLS ${released.min_installer} or newer; running ${VERSION} with compatibility ${INSTALLER_COMPATIBILITY_VERSION}`)
     }
   }
 }
@@ -755,7 +756,10 @@ export async function main(): Promise<number> {
   const args = process.argv.slice(2)
   if (args.length === 0) throw new Error('no lifecycle command supplied')
   if (args.length === 1 && (args[0] === '--version' || args[0] === '-v')) {
-    console.log(`jls ${VERSION}`)
+    const compatibility = INSTALLER_COMPATIBILITY_VERSION === VERSION
+      ? ''
+      : ` (compatibility ${INSTALLER_COMPATIBILITY_VERSION})`
+    console.log(`jls ${VERSION}${compatibility}`)
     return 0
   }
   if (args.some((arg) => arg === '--help' || arg === '-h') || args[0] === 'help') {
