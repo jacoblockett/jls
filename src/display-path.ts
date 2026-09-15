@@ -10,6 +10,9 @@ function inside(root: string, target: string): string | undefined {
 export function displayManagedPath(scopeRoot: string, target: string): string {
   const rel = inside(scopeRoot, target)
   if (rel === undefined) return target
+  // The selected management root is user-facing context, so render it as the
+  // native absolute path. Descendants remain scope-localized for diagnostics.
+  if (rel === '') return resolve(scopeRoot)
   const anchor = basename(resolve(scopeRoot)) || basename(scopeRoot) || scopeRoot
   return `/${[anchor, ...rel.split(/[\\/]+/)].filter(Boolean).join('/')}`
 }
