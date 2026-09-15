@@ -1,13 +1,10 @@
 {
-  "format": 1,
   "skills": {
     "map": {
-      "manifest_url": "https://github.com/jacoblockett/jls-map/releases/latest/download/manifest.json",
-      "description": "Durable intent graph for decisions and goals"
+      "manifest_url": "https://github.com/jacoblockett/jls-map/releases/latest/download/manifest.json"
     },
     "tasks": {
-      "manifest_url": "https://github.com/jacoblockett/jls-tasks/releases/latest/download/manifest.json",
-      "description": "Compiles a goal into a taskset using Beads"
+      "manifest_url": "https://github.com/jacoblockett/jls-tasks/releases/latest/download/manifest.json"
     }
   }
 }
