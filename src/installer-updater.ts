@@ -28,9 +28,22 @@ export type ReleaseArtifact = {
 export type TargetArtifactMap = Partial<Record<TargetKey, ReleaseArtifact>>
 export type SkillArtifactMap = Partial<Record<TargetKey | 'portable', ReleaseArtifact>>
 
+export type DependencyDetect = {
+  command?: string[]
+  path?: string[]
+}
+
+export type SkillDependency = {
+  name: string
+  install_url: string
+  detect: DependencyDetect
+}
+
 export type ReleasedSkill = {
   version: string
   min_installer: string
+  description?: string
+  dependencies?: SkillDependency[]
   artifacts: SkillArtifactMap
 }
 
@@ -74,6 +87,7 @@ export type SkillPackageManifest = {
   version: string
   min_installer: string
   description: string
+  dependencies?: SkillDependency[]
   skill_files: string[]
   harness_resources?: HarnessResources
   runtime_files?: string[]
@@ -110,6 +124,46 @@ export function compareVersions(a: string, b: string): number {
     if (left[i] !== right[i]) return left[i] < right[i] ? -1 : 1
   }
   return 0
+}
+
+function nonEmptyString(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} must be a non-empty string`)
+  return value
+}
+
+function stringArray(value: unknown, label: string): string[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length === 0) throw new Error(`${label} must be a non-empty array`)
+  return value.map((item, index) => nonEmptyString(item, `${label}[${index}]`))
+}
+
+function parseDependencies(value: unknown, label: string): SkillDependency[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length === 0) throw new Error(`${label} must be a non-empty array`)
+  return value.map((item, index) => {
+    const itemLabel = `${label}[${index}]`
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error(`${itemLabel} must be an object`)
+    const raw = item as Record<string, unknown>
+    const name = nonEmptyString(raw.name, `${itemLabel}.name`)
+    const installUrl = nonEmptyString(raw.install_url, `${itemLabel}.install_url`)
+    const parsedUrl = new URL(installUrl)
+    if (parsedUrl.protocol !== 'https:') throw new Error(`${itemLabel}.install_url must use HTTPS`)
+    if (!raw.detect || typeof raw.detect !== 'object' || Array.isArray(raw.detect)) {
+      throw new Error(`${itemLabel}.detect must be an object`)
+    }
+    const detectRaw = raw.detect as Record<string, unknown>
+    const command = stringArray(detectRaw.command, `${itemLabel}.detect.command`)
+    const path = stringArray(detectRaw.path, `${itemLabel}.detect.path`)
+    if (!command && !path) throw new Error(`${itemLabel}.detect must declare command and/or path`)
+    return {
+      name,
+      install_url: installUrl,
+      detect: {
+        ...(command ? { command } : {}),
+        ...(path ? { path } : {}),
+      },
+    }
+  })
 }
 
 function parseSha256(value: unknown, label: string): string {
@@ -190,9 +244,15 @@ export function parseSkillReleaseManifest(name: string, value: unknown): Release
   if (typeof raw.min_installer !== 'string' || !semverParts(raw.min_installer)) {
     throw new Error(`invalid minimum installer version for ${name}`)
   }
+  const description = raw.description === undefined
+    ? undefined
+    : nonEmptyString(raw.description, `released skill ${name}.description`)
+  const dependencies = parseDependencies(raw.dependencies, `released skill ${name}.dependencies`)
   return {
     version: raw.version,
     min_installer: raw.min_installer,
+    ...(description ? { description } : {}),
+    ...(dependencies ? { dependencies } : {}),
     artifacts: parseArtifactMap(raw.artifacts, `released skill ${name} artifacts`, true),
   }
 }
@@ -310,8 +370,7 @@ function packagePath(value: unknown, label: string): string {
 
 function optionalString(value: unknown, label: string): string | undefined {
   if (value === undefined) return undefined
-  if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} must be a non-empty string`)
-  return value
+  return nonEmptyString(value, label)
 }
 
 function pathArray(value: unknown, label: string, required = false): string[] | undefined {
@@ -382,6 +441,7 @@ export function parseSkillPackageManifest(value: unknown): SkillPackageManifest 
     version: raw.version,
     min_installer: raw.min_installer,
     description: raw.description,
+    dependencies: parseDependencies(raw.dependencies, `${raw.name} dependencies`),
     skill_files: pathArray(raw.skill_files, `${raw.name} skill_files`, true)!,
     harness_resources: harnessResources(raw.harness_resources, `${raw.name} harness_resources`),
     runtime_files: pathArray(raw.runtime_files, `${raw.name} runtime_files`),
@@ -454,6 +514,13 @@ export async function downloadSkillPackage(
     }
     if (manifest.min_installer !== released.min_installer) {
       throw new Error(`${name} package min_installer does not match release index`)
+    }
+    if (released.description !== undefined && manifest.description !== released.description) {
+      throw new Error(`${name} package description does not match release index`)
+    }
+    if (released.dependencies !== undefined
+      && JSON.stringify(manifest.dependencies ?? []) !== JSON.stringify(released.dependencies)) {
+      throw new Error(`${name} package dependencies do not match release index`)
     }
     assertPackageTarget(name, manifest, selected.key)
     assertPackageFiles(root, manifest)
