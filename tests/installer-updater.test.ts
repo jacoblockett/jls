@@ -57,6 +57,15 @@ function skillRelease(version = '1.2.3', sha = '1'.repeat(64)) {
     name: 'example-skill',
     version,
     min_installer: '0.7.0',
+    description: 'Example skill',
+    dependencies: [{
+      name: 'Example CLI',
+      install_url: 'https://fixture.invalid/install',
+      detect: {
+        command: ['example'],
+        path: ['tools/example'],
+      },
+    }],
     artifacts: {
       'windows-x64': {
         url: 'https://fixture.invalid/example-skill-windows-x64.zip',
@@ -94,13 +103,48 @@ describe('release metadata', () => {
     expect(() => parseReleaseManifest({ ...releaseIndex(), format: 2 })).toThrow('unsupported release manifest format')
   })
 
-  test('external skill manifest owns version, compatibility, hashes, and target artifacts', () => {
+  test('external skill manifest owns profile metadata, compatibility, hashes, and target artifacts', () => {
     const released = parseSkillReleaseManifest('example-skill', skillRelease())
     expect(released.version).toBe('1.2.3')
     expect(released.min_installer).toBe('0.7.0')
+    expect(released.description).toBe('Example skill')
+    expect(released.dependencies?.[0]).toEqual({
+      name: 'Example CLI',
+      install_url: 'https://fixture.invalid/install',
+      detect: {
+        command: ['example'],
+        path: ['tools/example'],
+      },
+    })
     expect(released.artifacts['windows-x64']?.url).toEndWith('/example-skill-windows-x64.zip')
     expect(() => parseSkillReleaseManifest('other', skillRelease())).toThrow('identifies example-skill')
     expect(() => parseSkillReleaseManifest('example-skill', { ...skillRelease(), format: 2 })).toThrow('unsupported released skill manifest format')
+  })
+
+  test('dependency detection metadata requires at least one non-empty command or path array', () => {
+    expect(() => parseSkillReleaseManifest('example-skill', {
+      ...skillRelease(),
+      dependencies: [{
+        name: 'Example CLI',
+        install_url: 'https://fixture.invalid/install',
+        detect: {},
+      }],
+    })).toThrow('detect must declare command and/or path')
+    expect(() => parseSkillReleaseManifest('example-skill', {
+      ...skillRelease(),
+      dependencies: [{
+        name: 'Example CLI',
+        install_url: 'https://fixture.invalid/install',
+        detect: { command: [] },
+      }],
+    })).toThrow('detect.command must be a non-empty array')
+  })
+
+  test('legacy published skill manifests without profile metadata remain readable during transition', () => {
+    const { description, dependencies, ...legacy } = skillRelease()
+    const released = parseSkillReleaseManifest('example-skill', legacy)
+    expect(released.description).toBeUndefined()
+    expect(released.dependencies).toBeUndefined()
   })
 
   test('stable release fetch resolves referenced skill manifests', async () => {
@@ -109,6 +153,7 @@ describe('release metadata', () => {
       fixtureFetcher(releaseIndex()),
     )
     expect(resolved?.skills['example-skill'].version).toBe('1.2.3')
+    expect(resolved?.skills['example-skill'].description).toBe('Example skill')
   })
 
   test('unpublished referenced skills are omitted without breaking installer update discovery', async () => {
@@ -155,6 +200,11 @@ describe('skill package contract', () => {
       version: '1.2.3',
       min_installer: '0.7.0',
       description: 'Example',
+      dependencies: [{
+        name: 'Example CLI',
+        install_url: 'https://fixture.invalid/install',
+        detect: { command: ['example'], path: ['tools/example'] },
+      }],
       skill_files: ['SKILL.md'],
       runtime: 'native',
       runtime_artifacts: { 'windows-x64': 'runtime/windows-x64/example.exe' },
@@ -166,6 +216,7 @@ describe('skill package contract', () => {
       }],
     })
     expect(parsed.name).toBe('example-skill')
+    expect(parsed.dependencies?.[0].detect).toEqual({ command: ['example'], path: ['tools/example'] })
     expect(parsed.runtime_artifacts?.['windows-x64']).toBe('runtime/windows-x64/example.exe')
     expect(parsed.generated_data?.[0]).toEqual({
       path: '.example',
@@ -216,6 +267,7 @@ describe('skill package contract', () => {
     const released: ReleasedSkill = {
       version: '1.2.3',
       min_installer: '0.7.0',
+      description: 'Example',
       artifacts: {
         'windows-x64': {
           url: 'https://fixture.invalid/example-skill-windows-x64.zip',
