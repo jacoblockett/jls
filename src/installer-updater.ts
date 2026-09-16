@@ -18,7 +18,6 @@ import installerManifest from '../manifest.json'
 if (Bun.isStandaloneExecutable) compiledTarget()
 
 export const DEFAULT_RELEASE_MANIFEST_URL = 'https://github.com/jacoblockett/jls/releases/latest/download/manifest.json'
-export const INSTALLER_VERSION = installerManifest.version
 export const INSTALLER_COMPATIBILITY_VERSION = installerManifest.compatibility_version ?? installerManifest.version
 
 type FetchLike = typeof fetch
@@ -57,6 +56,7 @@ export type SkillReference = {
 export type ReleaseIndex = {
   installer: {
     version: string
+    compatibility_version: string
     artifacts: TargetArtifactMap
   }
   skills: Record<string, SkillReference>
@@ -65,6 +65,7 @@ export type ReleaseIndex = {
 export type ReleaseManifest = {
   installer: {
     version: string
+    compatibility_version: string
     artifacts: TargetArtifactMap
   }
   skills: Record<string, ReleasedSkill>
@@ -220,6 +221,12 @@ export function parseReleaseManifest(value: unknown): ReleaseIndex {
   if (typeof installerRaw.version !== 'string' || !semverParts(installerRaw.version)) {
     throw new Error('invalid installer release version')
   }
+  const compatibilityVersion = installerRaw.compatibility_version === undefined
+    ? installerRaw.version
+    : installerRaw.compatibility_version
+  if (typeof compatibilityVersion !== 'string' || !semverParts(compatibilityVersion)) {
+    throw new Error('invalid installer compatibility version')
+  }
   const installerArtifacts = parseArtifactMap(installerRaw.artifacts, 'installer release artifacts', false)
 
   if (!raw.skills || typeof raw.skills !== 'object' || Array.isArray(raw.skills)) {
@@ -232,7 +239,11 @@ export function parseReleaseManifest(value: unknown): ReleaseIndex {
   }
 
   return {
-    installer: { version: installerRaw.version, artifacts: installerArtifacts },
+    installer: {
+      version: installerRaw.version,
+      compatibility_version: compatibilityVersion,
+      artifacts: installerArtifacts,
+    },
     skills,
   }
 }
