@@ -143,7 +143,7 @@ describe('install preflight classification', () => {
 })
 
 describe('runtime-facing installer behavior', () => {
-  test('--version reports the installer manifest version', () => {
+  test('--version reports release and compatibility metadata', () => {
     const repo = resolve(import.meta.dir, '..')
     const manifest = JSON.parse(readFileSync(join(repo, 'manifest.json'), 'utf8'))
     const result = spawnSync(process.execPath, [join(repo, 'src', 'jls-v04-core.ts'), '--version'], {
@@ -151,6 +151,9 @@ describe('runtime-facing installer behavior', () => {
       windowsHide: true,
     })
     expect(result.status).toBe(0)
-    expect(result.stdout.trim()).toBe(`jls ${manifest.version}`)
+    expect(result.stdout).toContain(manifest.version)
+    if (manifest.compatibility_version !== manifest.version) {
+      expect(result.stdout).toContain(manifest.compatibility_version)
+    }
   })
 })
