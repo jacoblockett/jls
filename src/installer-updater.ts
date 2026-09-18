@@ -357,16 +357,6 @@ async function downloadVerified(
   }
 }
 
-export async function downloadVerifiedInstaller(
-  update: InstallerUpdate,
-  destination: string,
-  fetcher: FetchLike = fetch,
-): Promise<string> {
-  const path = await downloadVerified(update.artifact, destination, 'installer update', fetcher)
-  try { chmodSync(path, 0o755) } catch {}
-  return path
-}
-
 export async function stageInstallerUpdate(
   executable: string,
   update: InstallerUpdate,
@@ -374,15 +364,13 @@ export async function stageInstallerUpdate(
 ): Promise<string> {
   const staged = join(dirname(executable), `.${basename(executable)}.update-${process.pid}-${Date.now()}`)
   try {
-    return await downloadVerifiedInstaller(update, staged, fetcher)
+    const path = await downloadVerified(update.artifact, staged, 'installer update', fetcher)
+    try { chmodSync(path, 0o755) } catch {}
+    return path
   } catch (error) {
     try { rmSync(staged, { force: true }) } catch {}
     throw error
   }
-}
-
-function packagePath(value: unknown, label: string): string {
-  return containedPath(value, label)
 }
 
 function optionalString(value: unknown, label: string): string | undefined {
@@ -393,7 +381,7 @@ function optionalString(value: unknown, label: string): string | undefined {
 function pathArray(value: unknown, label: string, required = false): string[] | undefined {
   if (value === undefined && !required) return undefined
   if (!Array.isArray(value) || (required && value.length === 0)) throw new Error(`${label} must be a non-empty array`)
-  return value.map((item, index) => packagePath(item, `${label}[${index}]`))
+  return value.map((item, index) => containedPath(item, `${label}[${index}]`))
 }
 
 function pathRecord(value: unknown, label: string): Record<string, string> | undefined {
@@ -401,7 +389,7 @@ function pathRecord(value: unknown, label: string): Record<string, string> | und
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`)
   const result: Record<string, string> = {}
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    result[key] = packagePath(item, `${label}.${key}`)
+    result[key] = containedPath(item, `${label}.${key}`)
   }
   return result
 }
@@ -445,8 +433,8 @@ export function parseSkillPackageManifest(value: unknown): SkillPackageManifest 
         }
         const entry = value as Record<string, unknown>
         return {
-          path: packagePath(entry.path, `${raw.name} generated_data[${index}].path`),
-          marker: packagePath(entry.marker, `${raw.name} generated_data[${index}].marker`),
+          path: containedPath(entry.path, `${raw.name} generated_data[${index}].path`),
+          marker: containedPath(entry.marker, `${raw.name} generated_data[${index}].marker`),
         }
       })
     })()
@@ -466,7 +454,7 @@ export function parseSkillPackageManifest(value: unknown): SkillPackageManifest 
     cli_token: optionalString(raw.cli_token, `${raw.name} cli_token`),
     instruction_fragment: raw.instruction_fragment === undefined
       ? undefined
-      : packagePath(raw.instruction_fragment, `${raw.name} instruction_fragment`),
+      : containedPath(raw.instruction_fragment, `${raw.name} instruction_fragment`),
     generated_data: generatedData,
   }
 }
