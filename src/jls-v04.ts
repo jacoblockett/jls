@@ -98,7 +98,6 @@ type NavResult<T> = T | typeof BACK_SIGNAL
 
 type LifecycleAction = 'install' | 'update' | 'uninstall'
 
-const agentCatalog: HarnessAdapter[] = HARNESS_ADAPTERS
 
 function newWizardState(): WizardState {
   return { shown: false, steps: new Map() }
@@ -253,13 +252,13 @@ function commandExists(command: string): boolean {
 }
 
 function detectedAgents(): HarnessAdapter[] {
-  return agentCatalog.filter((agent) => (
+  return HARNESS_ADAPTERS.filter((agent) => (
     commandExists(agent.command) || agent.detectionPaths(userHome()).some(existsSync)
   ))
 }
 
 function agentLabel(id: string): string {
-  return agentCatalog.find((agent) => agent.id === id)?.label ?? id
+  return HARNESS_ADAPTERS.find((agent) => agent.id === id)?.label ?? id
 }
 
 function agentPaths(agent: string, scope: Scope) {
@@ -299,7 +298,7 @@ function harnessResourcesPresent(manifest: SkillPackageManifest, agent: string, 
 
 function discoverInstallations(scope: Scope): InstallGroup[] {
   const groups = new Map<string, InstallGroup>()
-  for (const agent of agentCatalog) {
+  for (const agent of HARNESS_ADAPTERS) {
     const paths = agentPaths(agent.id, scope)
     if (!existsSync(paths.skillRoot) || !statSync(paths.skillRoot).isDirectory()) continue
     for (const entry of readdirSync(paths.skillRoot).sort()) {
