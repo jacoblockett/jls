@@ -22,7 +22,6 @@ import {
 } from './harnesses'
 import { classifyInstallTargets, staleUpdateTargets, type InstallTargetState } from './install-preflight'
 import {
-  compareVersions,
   downloadSkillPackage,
   fetchStableReleaseManifest,
   INSTALLER_COMPATIBILITY_VERSION,
