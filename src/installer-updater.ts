@@ -69,6 +69,7 @@ export type ReleaseManifest = {
     artifacts: TargetArtifactMap
   }
   skills: Record<string, ReleasedSkill>
+  incompatibleSkills: Record<string, ReleasedSkill>
 }
 
 export type InstallerUpdate = {
@@ -288,15 +289,17 @@ export async function fetchStableReleaseManifest(
   if (!index) return null
 
   const skills: Record<string, ReleasedSkill> = {}
+  const incompatibleSkills: Record<string, ReleasedSkill> = {}
   await Promise.all(Object.entries(index.skills).map(async ([name, reference]) => {
     const response = await fetcher(reference.manifest_url, { headers: { 'user-agent': 'jls' } })
     if (response.status === 404) return
     if (!response.ok) throw new Error(`${name} release check failed with HTTP ${response.status}`)
     const released = parseSkillReleaseManifest(name, await response.json())
     if (isSkillCompatible(compatibilityVersion, released)) skills[name] = released
+    else incompatibleSkills[name] = released
   }))
 
-  return { installer: index.installer, skills }
+  return { installer: index.installer, skills, incompatibleSkills }
 }
 
 function targetKey(target?: TargetKey): TargetKey {
