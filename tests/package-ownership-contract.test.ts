@@ -9,7 +9,6 @@ import {
 
 function baseManifest() {
   return {
-    format: 1,
     name: 'example-skill',
     version: '1.2.3',
     min_installer: '0.3.2',
