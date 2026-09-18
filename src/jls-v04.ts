@@ -1,8 +1,8 @@
 import * as prompts from '@clack/prompts'
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
-import { homedir, platform } from 'node:os'
-import { basename, dirname, join, normalize, resolve } from 'node:path'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { platform } from 'node:os'
+import { basename, join } from 'node:path'
 import { styleText } from 'node:util'
 import { exclusiveMultiselect, type ExclusiveOption } from './exclusive-multiselect'
 import { HARNESS_ADAPTERS, harnessAdapter, type HarnessAdapter } from './harnesses'
@@ -31,6 +31,13 @@ import {
   type InstallCollision,
 } from './install-collision-override'
 import { displayManagedPath } from './display-path'
+import {
+  cachedManifestPath,
+  canonicalPath,
+  installerDataRoot,
+  normalizedPath,
+  userHome,
+} from './installer-paths'
 import { missingDependenciesText, missingSkillDependencies } from './skill-dependencies'
 import { prepareInstallerSelfUninstall } from './self-uninstall'
 import { main as lifecycleMain } from './jls-v04-core'
@@ -205,70 +212,6 @@ async function chooseYesNo(
   )
   if (choice === BACK_SIGNAL || choice === 'no') return BACK_SIGNAL
   return true
-}
-
-function rawUserHome(): string {
-  return process.env.USERPROFILE || process.env.HOME || homedir()
-}
-
-function expandPath(raw: string): string {
-  let value = raw.trim()
-  value = value.replace(/%([^%]+)%/g, (whole, name) => process.env[name] ?? whole)
-  value = value.replace(/\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (whole, braced, plain) => {
-    const name = braced || plain
-    return process.env[name] ?? whole
-  })
-  if (value === '~') return rawUserHome()
-  if (value.startsWith('~/') || value.startsWith('~\\')) return join(rawUserHome(), value.slice(2))
-  return value
-}
-
-function normalizedPath(path: string): string {
-  const normalized = normalize(path)
-  if (!isWindows) return normalized
-  return normalized.replace(/^([a-z]):/, (_, drive: string) => `${drive.toUpperCase()}:`)
-}
-
-function canonicalPath(raw: string): string {
-  const absolute = resolve(expandPath(raw))
-  if (existsSync(absolute)) {
-    try {
-      return normalizedPath(realpathSync.native(absolute))
-    } catch {}
-  }
-  if (isWindows) {
-    let existing = absolute
-    const missing: string[] = []
-    while (!existsSync(existing)) {
-      const parent = dirname(existing)
-      if (parent === existing) break
-      missing.unshift(basename(existing))
-      existing = parent
-    }
-    if (existsSync(existing)) {
-      try {
-        return normalizedPath(join(realpathSync.native(existing), ...missing))
-      } catch {}
-    }
-  }
-  return normalizedPath(absolute)
-}
-
-function userHome(): string {
-  return canonicalPath(rawUserHome())
-}
-
-function installerDataRoot(): string {
-  if (isWindows) {
-    const local = process.env.LOCALAPPDATA || join(userHome(), 'AppData', 'Local')
-    return canonicalPath(join(local, 'JLS'))
-  }
-  const data = process.env.XDG_DATA_HOME || join(userHome(), '.local', 'share')
-  return canonicalPath(join(data, 'JLS'))
-}
-
-function cachedManifestPath(name: string): string {
-  return join(installerDataRoot(), 'skill-manifests', `${name}.json`)
 }
 
 function resolveScope(raw: 'cwd' | 'user'): Scope {
