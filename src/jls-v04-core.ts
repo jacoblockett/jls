@@ -369,10 +369,6 @@ function discoverInstallations(scope: Scope): InstallGroup[] {
     .sort((a, b) => a.key.localeCompare(b.key))
 }
 
-function installedVersions(group: InstallGroup): string[] {
-  return [...new Set(group.targets.map((target) => target.version))].sort()
-}
-
 function runtimeCliPath(manifest: Manifest, scope: Scope): string {
   if (!manifest.runtime_cli) throw new Error(`${manifest.name} manifest is missing runtime_cli`)
   return join(runtimeSkillRoot(scope.root, manifest.name), 'bin', `${manifest.runtime_cli}${compiledTarget().executableSuffix}`)
