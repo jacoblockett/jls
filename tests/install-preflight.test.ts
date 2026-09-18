@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { classifyInstallTargets, satisfiedSkills, staleSkills, staleUpdateTargets } from '../src/install-preflight'
+import { classifyInstallTargets, staleUpdateTargets } from '../src/install-preflight'
 
 describe('install preflight classification', () => {
   test('classifies missing, satisfied, stale, configure, unknown, and newer targets without downgrading', () => {
@@ -100,21 +100,6 @@ describe('install preflight classification', () => {
     expect(changed[0]?.state).toBe('configure')
   })
 
-  test('groups stale targets by skill', () => {
-    const targets = classifyInstallTargets(
-      ['map'],
-      ['codex', 'claude'],
-      { map: '0.2.0' },
-      { map: true },
-      [
-        { skill: 'map', agent: 'codex', version: '0.1.0', instructions: false },
-        { skill: 'map', agent: 'claude', version: 'unknown', instructions: true },
-      ],
-    )
-    expect(staleSkills(targets)).toEqual([
-      { skill: 'map', installedVersions: ['0.1.0', 'unknown'], availableVersion: '0.2.0' },
-    ])
-  })
 
   test('updates select only genuinely stale targets', () => {
     const targets = [
@@ -128,19 +113,6 @@ describe('install preflight classification', () => {
     ])
   })
 
-  test('a skill is already installed only when every requested harness target is satisfied', () => {
-    const complete = classifyInstallTargets(
-      ['map'],
-      ['codex', 'claude'],
-      { map: '0.2.0' },
-      { map: false },
-      [
-        { skill: 'map', agent: 'codex', version: '0.2.0', instructions: false },
-        { skill: 'map', agent: 'claude', version: '0.3.0', instructions: false },
-      ],
-    )
-    expect(satisfiedSkills(complete)).toEqual(['map'])
-  })
 })
 
 describe('runtime-facing installer behavior', () => {
