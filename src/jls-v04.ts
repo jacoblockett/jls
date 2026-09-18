@@ -694,8 +694,16 @@ async function installAtScope(
       }
     })
     const selectableSkills = skillItems.filter((item) => !item.disabled)
+    if (skillItems.length === 0) {
+      prompts.log.warn(
+        Object.keys(release.incompatibleSkills).length > 0
+          ? 'No skills compatible with this JLS installer are currently available.'
+          : 'No skills are currently available to install.',
+      )
+      return BACK_SIGNAL
+    }
     if (selectableSkills.length === 0) {
-      prompts.log.warn('No skills are available to install because all available skills are already installed.')
+      prompts.log.warn('All compatible skills are already installed.')
       return BACK_SIGNAL
     }
 
