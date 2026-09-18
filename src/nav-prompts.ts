@@ -49,19 +49,13 @@ function symbolBar(state: State): string {
   return styleText('cyan', S_BAR)
 }
 
-function footer(hasGuide: boolean, allowBack: boolean, text = false): string {
-  const pieces = text
-    ? [
-        `${styleText('dim', 'Enter')} confirm`,
-        ...(allowBack ? [`${styleText('dim', 'Backspace')} back`] : []),
-        `${styleText('dim', 'Esc')} exit`,
-      ]
-    : [
-        `${styleText('dim', '↑/↓')} navigate`,
-        `${styleText('dim', 'Enter')} confirm`,
-        ...(allowBack ? [`${styleText('dim', 'Backspace')} back`] : []),
-        `${styleText('dim', 'Esc')} exit`,
-      ]
+function footer(hasGuide: boolean, allowBack: boolean): string {
+  const pieces = [
+    `${styleText('dim', '↑/↓')} navigate`,
+    `${styleText('dim', 'Enter')} confirm`,
+    ...(allowBack ? [`${styleText('dim', 'Backspace')} back`] : []),
+    `${styleText('dim', 'Esc')} exit`,
+  ]
   const line = `${hasGuide ? `${styleText('cyan', S_BAR)}  ` : ''}${pieces.join(' • ')}`
   return hasGuide ? `${line}\n${styleText('cyan', S_BAR_END)}` : line
 }
