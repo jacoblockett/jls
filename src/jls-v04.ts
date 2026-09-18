@@ -909,6 +909,9 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
       for (const { group } of targets) {
         packages.set(group.skill, await downloadSkillPackage(group.skill, release.skills[group.skill]))
       }
+    } catch (error) {
+      for (const pkg of packages.values()) pkg.cleanup()
+      throw error
     } finally {
       spinner.clear()
     }
