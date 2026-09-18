@@ -714,6 +714,9 @@ async function updateCommand(args: string[]): Promise<number> {
   const scope = requireScope(parsed)
   const release = requireRelease(await fetchStableReleaseManifest())
   const groups = matchingGroups(parsed, scope)
+  if (parsed.skills.length > 0 && groups.length === 0) {
+    throw new Error('no installations match update filters')
+  }
 
   for (const group of groups) {
     const released = release.skills[group.skill]
