@@ -1,6 +1,6 @@
 import { styleText } from 'node:util'
 import type { Readable, Writable } from 'node:stream'
-import { SelectPrompt, TextPrompt, settings, wrapTextWithPrefix, type State } from '@clack/core'
+import { SelectPrompt, settings, wrapTextWithPrefix, type State } from '@clack/core'
 
 export const BACK_SIGNAL = Symbol('jls-back')
 
@@ -25,13 +25,6 @@ export type NavSelectOptions<Value> = CommonNavOptions & {
   onCursor?: (value: Value) => void
 }
 
-export type NavTextOptions = CommonNavOptions & {
-  message: string
-  placeholder?: string
-  initialValue?: string
-  validate?: (value: string | undefined) => string | Error | undefined
-  onInput?: (value: string) => void
-}
 
 const S_STEP_ACTIVE = '◆'
 const S_STEP_CANCEL = '■'
@@ -159,64 +152,3 @@ export async function navSelect<Value>(opts: NavSelectOptions<Value>): Promise<V
   return value as Value | symbol
 }
 
-class BackTextPrompt extends TextPrompt {
-  backRequested = false
-  private hadInput: boolean
-
-  constructor(
-    opts: any,
-    private readonly allowBack: boolean,
-    onInput?: (value: string) => void,
-  ) {
-    super(opts)
-    this.hadInput = !!opts.initialValue
-    this.on('userInput', (value) => onInput?.(value ?? ''))
-    this.on('key', (_char, key) => {
-      if (this.allowBack && key.name === 'backspace' && !this.hadInput) {
-        this.backRequested = true
-        this.state = 'submit'
-      }
-      this.hadInput = this.userInput.length > 0
-    })
-  }
-}
-
-export async function navText(opts: NavTextOptions): Promise<string | symbol> {
-  const hasGuide = opts.withGuide ?? settings.withGuide
-  const allowBack = opts.allowBack ?? true
-  let prompt!: BackTextPrompt
-  prompt = new BackTextPrompt({
-    validate: opts.validate,
-    placeholder: opts.placeholder,
-    initialValue: opts.initialValue,
-    output: opts.output,
-    signal: opts.signal,
-    input: opts.input,
-    render() {
-      const titlePrefix = `${hasGuide ? `${styleText('gray', S_BAR)}\n` : ''}${symbol(this.state)}  `
-      const title = `${titlePrefix}${opts.message}\n`
-      const placeholder = opts.placeholder && opts.placeholder.length > 0
-        ? styleText('inverse', opts.placeholder[0]) + styleText('dim', opts.placeholder.slice(1))
-        : styleText(['inverse', 'hidden'], '_')
-      const userInput = !this.userInput ? placeholder : this.userInputWithCursor
-      const value = this.value ?? ''
-
-      if (this.state === 'error') {
-        const errorText = this.error ? `  ${styleText('yellow', this.error)}` : ''
-        return `${title.trim()}\n${hasGuide ? `${styleText('yellow', S_BAR)}  ` : ''}${userInput}\n${hasGuide ? styleText('yellow', S_BAR_END) : ''}${errorText}\n`
-      }
-      if (this.state === 'submit') {
-        if (prompt.backRequested) return `${title}${backHistory(hasGuide)}`
-        return `${title}${hasGuide ? styleText('gray', S_BAR) : ''}${value ? `  ${styleText('dim', value)}` : ''}`
-      }
-      if (this.state === 'cancel') {
-        return `${title}${hasGuide ? styleText('gray', S_BAR) : ''}${value ? `  ${styleText(['strikethrough', 'dim'], value)}` : ''}`
-      }
-      return `${title}${hasGuide ? `${styleText('cyan', S_BAR)}  ` : ''}${userInput}\n${blankGuide(hasGuide)}\n${footer(hasGuide, allowBack, true)}\n`
-    },
-  }, allowBack, opts.onInput)
-
-  const value = await prompt.prompt()
-  if (prompt.backRequested) return BACK_SIGNAL
-  return value as string | symbol
-}
