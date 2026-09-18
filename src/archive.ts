@@ -1,5 +1,5 @@
 import AdmZip from 'adm-zip'
-import { mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 export function containedPath(value: unknown, label: string): string {
@@ -13,16 +13,6 @@ export function containedPath(value: unknown, label: string): string {
     throw new Error(`${label} must be a relative contained path`)
   }
   return parts.join('/')
-}
-
-export function createZipFromDirectory(sourceRoot: string, archive: string): void {
-  const zip = new AdmZip()
-  for (const name of readdirSync(sourceRoot).sort()) {
-    const source = join(sourceRoot, name)
-    if (statSync(source).isDirectory()) zip.addLocalFolder(source, name)
-    else zip.addLocalFile(source)
-  }
-  zip.writeZip(archive)
 }
 
 export function extractZip(archive: string, destinationRoot: string): void {
