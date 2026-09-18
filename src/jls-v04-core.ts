@@ -16,7 +16,6 @@ import {
   HARNESS_ADAPTERS,
   harnessAdapter,
   normalizeHarnessId,
-  type HarnessAdapter,
   type HarnessPaths,
 } from './harnesses'
 import { classifyInstallTargets, staleUpdateTargets, type InstallTargetState } from './install-preflight'
@@ -89,7 +88,6 @@ type HarnessResourceTarget = {
   destination: string
 }
 
-const agentCatalog: HarnessAdapter[] = HARNESS_ADAPTERS
 
 function runtimeMetaRoot(scopeRoot: string): string {
   return join(scopeRoot, '.jls')
@@ -118,7 +116,7 @@ function commandExists(command: string): boolean {
 }
 
 function detectedAgents(): string[] {
-  return agentCatalog
+  return HARNESS_ADAPTERS
     .filter((agent) => commandExists(agent.command) || agent.detectionPaths(userHome()).some(existsSync))
     .map((agent) => agent.id)
 }
@@ -281,7 +279,7 @@ function installHarnessResources(
 
 function discoverInstallations(scope: Scope): InstallGroup[] {
   const groups = new Map<string, InstallGroup>()
-  for (const agent of agentCatalog) {
+  for (const agent of HARNESS_ADAPTERS) {
     const paths = agentPaths(agent.id, scope)
     if (!existsSync(paths.skillRoot) || !statSync(paths.skillRoot).isDirectory()) continue
     for (const entry of readdirSync(paths.skillRoot).sort()) {
