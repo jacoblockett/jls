@@ -5,13 +5,12 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  realpathSync,
   renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs'
-import { homedir, platform } from 'node:os'
+import { platform } from 'node:os'
 import { basename, dirname, join, normalize, resolve } from 'node:path'
 import {
   HARNESS_ADAPTERS,
@@ -33,6 +32,13 @@ import {
 import { detectInstallCollisions } from './install-collision-override'
 import { containerAncestors, pruneEmptyContainers } from './container-pruning'
 import { displayManagedPath } from './display-path'
+import {
+  cachedManifestPath,
+  canonicalPath,
+  normalizedPath,
+  skillMetadataRoot,
+  userHome,
+} from './installer-paths'
 import { removeLegacyOwnershipMarker } from './legacy-ownership'
 import { renderResource } from './resource-render'
 import { compiledTarget } from './targets'
@@ -84,74 +90,6 @@ type HarnessResourceTarget = {
 }
 
 const agentCatalog: HarnessAdapter[] = HARNESS_ADAPTERS
-
-function rawUserHome(): string {
-  return process.env.USERPROFILE || process.env.HOME || homedir()
-}
-
-function expandPath(raw: string): string {
-  let value = raw.trim()
-  value = value.replace(/%([^%]+)%/g, (whole, name) => process.env[name] ?? whole)
-  value = value.replace(/\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (whole, braced, plain) => {
-    const name = braced || plain
-    return process.env[name] ?? whole
-  })
-  if (value === '~') return rawUserHome()
-  if (value.startsWith('~/') || value.startsWith('~\\')) return join(rawUserHome(), value.slice(2))
-  return value
-}
-
-function normalizedPath(path: string): string {
-  const value = normalize(path)
-  if (!isWindows) return value
-  return value.replace(/^([a-z]):/, (_, drive: string) => `${drive.toUpperCase()}:`)
-}
-
-function canonicalPath(raw: string): string {
-  const absolute = resolve(expandPath(raw))
-  if (existsSync(absolute)) {
-    try {
-      return normalizedPath(realpathSync.native(absolute))
-    } catch {}
-  }
-  if (isWindows) {
-    let existing = absolute
-    const missing: string[] = []
-    while (!existsSync(existing)) {
-      const parent = dirname(existing)
-      if (parent === existing) break
-      missing.unshift(basename(existing))
-      existing = parent
-    }
-    if (existsSync(existing)) {
-      try {
-        return normalizedPath(join(realpathSync.native(existing), ...missing))
-      } catch {}
-    }
-  }
-  return normalizedPath(absolute)
-}
-
-function userHome(): string {
-  return canonicalPath(rawUserHome())
-}
-
-function installerDataRoot(): string {
-  if (isWindows) {
-    const local = process.env.LOCALAPPDATA || join(userHome(), 'AppData', 'Local')
-    return canonicalPath(join(local, 'JLS'))
-  }
-  const data = process.env.XDG_DATA_HOME || join(userHome(), '.local', 'share')
-  return canonicalPath(join(data, 'JLS'))
-}
-
-function skillMetadataRoot(): string {
-  return join(installerDataRoot(), 'skill-manifests')
-}
-
-function cachedManifestPath(name: string): string {
-  return join(skillMetadataRoot(), `${name}.json`)
-}
 
 function runtimeMetaRoot(scopeRoot: string): string {
   return join(scopeRoot, '.jls')
