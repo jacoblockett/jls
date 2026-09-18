@@ -147,6 +147,7 @@ describe('release metadata', () => {
       '0.4.0',
     )
     expect(compatible?.skills['example-skill']?.version).toBe('1.2.3')
+    expect(compatible?.incompatibleSkills).toEqual({})
 
     const incompatible = await fetchStableReleaseManifest(
       'https://fixture.invalid/manifest.json',
@@ -154,6 +155,7 @@ describe('release metadata', () => {
       '0.4.0',
     )
     expect(incompatible?.skills['example-skill']).toBeUndefined()
+    expect(incompatible?.incompatibleSkills['example-skill']?.min_installer).toBe('0.4.1')
     expect(isSkillCompatible('0.4.0', { min_installer: '0.4.1' })).toBe(false)
   })
 
@@ -174,6 +176,7 @@ describe('release metadata', () => {
       '0.7.0',
     )
     expect(resolved?.skills).toEqual({})
+    expect(resolved?.incompatibleSkills).toEqual({})
   })
 
   test('artifact selection remains exact-target with explicit portable fallback only', () => {
