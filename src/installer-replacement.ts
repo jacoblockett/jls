@@ -138,9 +138,6 @@ async function waitForReadySignal(readyFile: string, errorFile: string): Promise
   })
 }
 
-export function windowsInstallerReplacementScript(): string {
-  return WINDOWS_REPLACER
-}
 
 export async function prepareInstallerReplacement(
   staged: string,
