@@ -15,11 +15,6 @@ export type InstallTargetState = {
   state: 'missing' | 'satisfied' | 'configure' | 'stale'
 }
 
-export type StaleSkill = {
-  skill: string
-  installedVersions: string[]
-  availableVersion: string
-}
 
 function semverParts(version: string): [number, number, number] | undefined {
   const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version)
@@ -100,34 +95,3 @@ export function classifyInstallTargets(
   return result
 }
 
-export function satisfiedSkills(targets: InstallTargetState[]): string[] {
-  const bySkill = new Map<string, InstallTargetState[]>()
-  for (const target of targets) {
-    const group = bySkill.get(target.skill) ?? []
-    group.push(target)
-    bySkill.set(target.skill, group)
-  }
-  return [...bySkill.entries()]
-    .filter(([, group]) => group.length > 0 && group.every((target) => target.state === 'satisfied'))
-    .map(([skill]) => skill)
-    .sort()
-}
-
-export function staleSkills(targets: InstallTargetState[]): StaleSkill[] {
-  const groups = new Map<string, StaleSkill>()
-  for (const target of targets) {
-    if (target.state !== 'stale') continue
-    const group = groups.get(target.skill) ?? {
-      skill: target.skill,
-      installedVersions: [],
-      availableVersion: target.availableVersion,
-    }
-    if (target.installedVersion && !group.installedVersions.includes(target.installedVersion)) {
-      group.installedVersions.push(target.installedVersion)
-    }
-    groups.set(target.skill, group)
-  }
-  return [...groups.values()]
-    .map((group) => ({ ...group, installedVersions: group.installedVersions.sort() }))
-    .sort((a, b) => a.skill.localeCompare(b.skill))
-}
