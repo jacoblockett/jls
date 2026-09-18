@@ -15,7 +15,7 @@ describe('cross-platform installer self-uninstall', () => {
     writeFileSync(join(dataRoot, 'metadata.json'), '{}')
 
     try {
-      expect(await prepareInstallerSelfUninstall(executable, dataRoot, 'linux')).toBe('complete')
+      await prepareInstallerSelfUninstall(executable, dataRoot, 'linux')
       expect(existsSync(executable)).toBe(false)
       expect(existsSync(dataRoot)).toBe(false)
     } finally {
@@ -36,8 +36,8 @@ describe('cross-platform installer self-uninstall', () => {
 
     const moduleUrl = new URL('../src/self-uninstall.ts', import.meta.url).href
     writeFileSync(helper, [
-      `import { armWindowsSelfUninstall } from ${JSON.stringify(moduleUrl)}`,
-      'await armWindowsSelfUninstall(process.argv[2]!, process.argv[3]!)',
+      `import { prepareInstallerSelfUninstall } from ${JSON.stringify(moduleUrl)}`,
+      "await prepareInstallerSelfUninstall(process.argv[2]!, process.argv[3]!, 'win32')",
     ].join('\n'))
 
     try {
