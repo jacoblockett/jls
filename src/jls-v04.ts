@@ -516,7 +516,7 @@ function uninstallSummary(
 
 function collisionSummary(scope: Scope, collisions: InstallCollision[]): string {
   return [
-    'The following existing paths conflict with files JLS needs to install. Continuing will remove or overwrite those exact paths and could cause permanent loss of data.',
+    'The following existing paths conflict with files JLS needs to write. Continuing will remove or overwrite those exact paths and could cause permanent loss of data.',
     '',
     ...collisions.map((collision) => noteBullet(displayManagedPath(scope.root, collision.path))),
   ].join('\n')
@@ -832,8 +832,12 @@ async function installAtScope(
           const collisions = [...collisionMap.values()]
           if (collisions.length > 0) {
             prompts.note(collisionSummary(scope, collisions), 'Collisions detected')
-            prompts.log.warn(wrapLogMessage('See above. Installation has failed due to colliding files/paths. Would you like to continue with installation despite this collision?'))
-            const destructiveProceed = await chooseConfirmation(state, `${prefix}.collision-confirm`, true)
+            const destructiveProceed = await chooseYesNo(
+              state,
+              `${prefix}.collision-confirm`,
+              'Would you like to continue and remove or overwrite these colliding paths?',
+              true,
+            )
             if (destructiveProceed === BACK_SIGNAL) continue instructionStep
             removeInstallCollisions(collisions)
           }
@@ -862,45 +866,101 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
   const installed = discoverInstallations(scope)
   const available = installed.filter((group) => updateAvailable(group, availableVersions))
   if (available.length === 0) {
-    prompts.log.info('No updates were found.')
+    prompts.log.info('No compatible updates were found.')
     return BACK_SIGNAL
   }
 
-  const applyUpdates = async (groups: InstallGroup[]): Promise<number> => {
-    for (const group of groups) {
+  const applyUpdates = async (
+    groups: InstallGroup[],
+    confirmationStep: string,
+    confirmationMessage = 'Continue?',
+  ): Promise<NavResult<number>> => {
+    const dependenciesAccepted = await acknowledgeMissingDependencies(
+      state,
+      `${confirmationStep}.dependencies`,
+      release,
+      groups.map((group) => group.skill),
+      scope,
+    )
+    if (dependenciesAccepted === BACK_SIGNAL) return BACK_SIGNAL
+
+    const targets = groups.map((group) => {
       const version = availableVersions[group.skill]
-      if (!version) continue
-      const staleAgents = group.targets
-        .filter((target) => {
-          try {
-            return compareVersions(target.version, version) < 0
-          } catch {
-            return false
-          }
-        })
-        .map((target) => target.agent)
-      if (staleAgents.length === 0) continue
-      const success = await runLifecycleItem('update', group.skill, [
-        'update',
-        group.skill,
-        ...lifecycleArgs(scope, staleAgents),
-      ])
-      if (!success) return 1
+      if (!version) throw new Error(`stable release does not contain ${group.skill}`)
+      return {
+        group,
+        agents: group.targets
+          .filter((target) => {
+            try {
+              return compareVersions(target.version, version) < 0
+            } catch {
+              return false
+            }
+          })
+          .map((target) => target.agent),
+      }
+    }).filter((target) => target.agents.length > 0)
+
+    const packages = new Map<string, Awaited<ReturnType<typeof import('./installer-updater')['downloadSkillPackage']>>>()
+    const spinner = prompts.spinner({ withGuide: false })
+    spinner.start('Preparing selected updates')
+    try {
+      const { downloadSkillPackage } = await import('./installer-updater')
+      for (const { group } of targets) {
+        packages.set(group.skill, await downloadSkillPackage(group.skill, release.skills[group.skill]))
+      }
+    } finally {
+      spinner.clear()
     }
-    finishOperation('info')
-    return 0
+
+    try {
+      prompts.note(updateSummary(scope, groups, availableVersions), 'The following skills will be updated:')
+      const proceed = await chooseYesNo(state, confirmationStep, confirmationMessage)
+      if (proceed === BACK_SIGNAL) return BACK_SIGNAL
+
+      const collisionMap = new Map<string, InstallCollision>()
+      for (const { group, agents } of targets) {
+        const pkg = packages.get(group.skill)
+        if (!pkg) continue
+        for (const collision of detectInstallCollisions(pkg, scope, agents)) {
+          collisionMap.set(normalizedPath(collision.path), collision)
+        }
+      }
+      const collisions = [...collisionMap.values()]
+      if (collisions.length > 0) {
+        prompts.note(collisionSummary(scope, collisions), 'Collisions detected')
+        const destructiveProceed = await chooseYesNo(
+          state,
+          `${confirmationStep}.collision-confirm`,
+          'Would you like to continue and remove or overwrite these colliding paths?',
+          true,
+        )
+        if (destructiveProceed === BACK_SIGNAL) return BACK_SIGNAL
+        removeInstallCollisions(collisions)
+      }
+
+      for (const { group, agents } of targets) {
+        const success = await runLifecycleItem('update', group.skill, [
+          'update',
+          group.skill,
+          ...lifecycleArgs(scope, agents),
+        ])
+        if (!success) return 1
+      }
+      finishOperation('success')
+      return 0
+    } finally {
+      for (const pkg of packages.values()) pkg.cleanup()
+    }
   }
 
   if (available.length === 1) {
     const group = available[0]
-    prompts.note(updateSummary(scope, [group], availableVersions), 'The following skills will be updated:')
-    const proceed = await chooseYesNo(
-      state,
+    return applyUpdates(
+      [group],
       `${prefix}.single-confirm`,
       `Would you like to update the ${displaySkillName(group.skill)} skill (${updateStatus(group, availableVersions)})?`,
     )
-    if (proceed === BACK_SIGNAL) return BACK_SIGNAL
-    return applyUpdates([group])
   }
 
   selectionStep:
@@ -909,7 +969,7 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
     const selected = await chooseMany(
       state,
       `${prefix}.skills`,
-      'The following updates are available. Please select which you would like to install.',
+      'The following updates are available. Please select which you would like to update.',
       available.map((group) => ({
         value: group.skill,
         label: `${displaySkillName(group.skill).padEnd(width)}  ${updateStatus(group, availableVersions)}`,
@@ -919,13 +979,11 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
     if (selected === BACK_SIGNAL) return BACK_SIGNAL
     const groups = available.filter((group) => selected.includes(group.skill))
 
-    prompts.note(updateSummary(scope, groups, availableVersions), 'The following skills will be updated:')
-    const proceed = await chooseConfirmation(state, `${prefix}.confirm`)
-    if (proceed === BACK_SIGNAL) continue selectionStep
-    return applyUpdates(groups)
+    const result = await applyUpdates(groups, `${prefix}.confirm`)
+    if (result === BACK_SIGNAL) continue selectionStep
+    return result
   }
 }
-
 async function uninstallAtScope(scope: Scope, state: WizardState, prefix: string): Promise<NavResult<number>> {
   const available = discoverInstallations(scope)
   if (available.length === 0) {
@@ -1087,8 +1145,12 @@ async function updateInstallerWizard(state: WizardState): Promise<NavResult<numb
     prompts.log.info('No updates were found.')
     return BACK_SIGNAL
   }
-  prompts.note(`An update was found. Would you like to update from v${VERSION} to v${update.version}? If you choose to update, this current session will end. You must relaunch the installer after updating.`)
-  const proceed = await chooseConfirmation(state, 'installer-update.confirm')
+  prompts.note(`An update from v${VERSION} to v${update.version} is available. Updating will end the current session, and you must relaunch the installer afterward.`)
+  const proceed = await chooseYesNo(
+    state,
+    'installer-update.confirm',
+    `Would you like to update JLS to v${update.version}?`,
+  )
   if (proceed === BACK_SIGNAL) return BACK_SIGNAL
   const staged = await stageInstallerUpdate(executable, update)
   await prepareInstallerReplacement(staged, executable)
