@@ -4,8 +4,6 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, watch, writeFile
 import { platform, tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 
-export type SelfUninstallCompletion = 'complete' | 'deferred'
-
 const WINDOWS_FINALIZER = String.raw`
 $ErrorActionPreference = 'Stop'
 $parentPid = [int]$env:JLS_UNINSTALL_PARENT_PID
@@ -94,7 +92,7 @@ function assertExecutable(executable: string): void {
   if (!statSync(executable).isFile()) throw new Error(`JLS executable path is not a file: ${executable}`)
 }
 
-export function removeInstallerSynchronously(executable: string, dataRoot: string): void {
+function removeInstallerSynchronously(executable: string, dataRoot: string): void {
   assertExecutable(executable)
   try {
     // POSIX permits unlinking the pathname of the running executable. The current process
@@ -166,11 +164,8 @@ async function waitForReadySignal(readyFile: string, errorFile: string): Promise
   })
 }
 
-export function windowsFinalizerScript(): string {
-  return WINDOWS_FINALIZER
-}
 
-export async function armWindowsSelfUninstall(executable: string, dataRoot: string): Promise<void> {
+async function armWindowsSelfUninstall(executable: string, dataRoot: string): Promise<void> {
   assertExecutable(executable)
   const token = `${process.pid}-${randomUUID()}`
   const readyFile = join(tmpdir(), `jls-uninstall-${token}.ready`)
@@ -238,12 +233,11 @@ export async function prepareInstallerSelfUninstall(
   executable: string,
   dataRoot: string,
   currentPlatform = platform(),
-): Promise<SelfUninstallCompletion> {
+): Promise<void> {
   if (currentPlatform === 'win32') {
     await armWindowsSelfUninstall(executable, dataRoot)
-    return 'deferred'
+    return
   }
 
   removeInstallerSynchronously(executable, dataRoot)
-  return 'complete'
 }
