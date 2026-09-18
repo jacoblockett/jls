@@ -10,7 +10,6 @@ import {
 function runtimePackage(root = ''): any {
   return {
     manifest: {
-      format: 1,
       name: 'map',
       version: '0.4.0',
       min_installer: '0.1.0',
