@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { classifyInstallTargets, satisfiedSkills, staleSkills, staleUpdateTargets } from '../src/install-preflight'
 
@@ -154,6 +155,40 @@ describe('runtime-facing installer behavior', () => {
     expect(result.stdout).toContain(manifest.version)
     if (manifest.compatibility_version !== manifest.version) {
       expect(result.stdout).toContain(manifest.compatibility_version)
+    }
+  })
+
+  test('explicit update fails when no installation matches the requested skill', () => {
+    const repo = resolve(import.meta.dir, '..')
+    const root = mkdtempSync(join(tmpdir(), 'jls-update-missing-'))
+    const release = {
+      installer: {
+        version: '0.3.2',
+        compatibility_version: '0.4.0',
+        artifacts: {
+          'windows-x64': {
+            url: 'https://fixture.invalid/jls-windows-x64.exe',
+            sha256: '0'.repeat(64),
+          },
+        },
+      },
+      skills: {},
+    }
+    const manifestUrl = `data:application/json,${encodeURIComponent(JSON.stringify(release))}`
+
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [join(repo, 'src', 'jls-v04-core.ts'), 'update', 'map', '--scope', root],
+        {
+          encoding: 'utf8',
+          windowsHide: true,
+          env: { ...process.env, JLS_UPDATE_MANIFEST_URL: manifestUrl },
+        },
+      )
+      expect(result.status).not.toBe(0)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
     }
   })
 })
