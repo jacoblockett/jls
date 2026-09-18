@@ -637,10 +637,12 @@ function availableVersions(release: ReleaseManifest): Record<string, string> {
 function ensureReleasedAndCompatible(release: ReleaseManifest, skills: string[]): void {
   for (const skill of skills) {
     const released = release.skills[skill]
-    if (!released) throw new Error(`stable release does not contain ${skill}`)
-    if (compareVersions(INSTALLER_COMPATIBILITY_VERSION, released.min_installer) < 0) {
-      throw new Error(`${skill} ${released.version} requires JLS ${released.min_installer} or newer; running ${VERSION} with compatibility ${INSTALLER_COMPATIBILITY_VERSION}`)
+    if (released) continue
+    const incompatible = release.incompatibleSkills[skill]
+    if (incompatible) {
+      throw new Error(`${skill} ${incompatible.version} requires JLS ${incompatible.min_installer} or newer; running ${VERSION} with compatibility ${INSTALLER_COMPATIBILITY_VERSION}`)
     }
+    throw new Error(`stable release does not contain ${skill}`)
   }
 }
 
@@ -716,7 +718,10 @@ async function updateCommand(args: string[]): Promise<number> {
 
   for (const group of groups) {
     const released = release.skills[group.skill]
-    if (!released) continue
+    if (!released) {
+      if (parsed.skills.includes(group.skill)) ensureReleasedAndCompatible(release, [group.skill])
+      continue
+    }
     const staleTargets = staleUpdateTargets(group.targets, released.version)
     if (staleTargets.length === 0) continue
 
