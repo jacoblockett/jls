@@ -10,9 +10,11 @@ import { BACK_SIGNAL, navSelect, type NavOption } from './nav-prompts'
 import {
   checkInstallerUpdate,
   compareVersions,
+  downloadSkillPackage,
   fetchStableReleaseManifest,
   parseSkillPackageManifest,
   stageInstallerUpdate,
+  type DownloadedSkillPackage,
   type ReleaseManifest,
   type SkillPackageManifest,
 } from './installer-updater'
@@ -203,14 +205,6 @@ async function chooseYesNo(
   )
   if (choice === BACK_SIGNAL || choice === 'no') return BACK_SIGNAL
   return true
-}
-
-async function chooseConfirmation(
-  state: WizardState,
-  stepId: string,
-  safeDefault = false,
-): Promise<true | typeof BACK_SIGNAL> {
-  return chooseYesNo(state, stepId, 'Continue?', safeDefault)
 }
 
 function rawUserHome(): string {
@@ -406,19 +400,10 @@ function displaySkillName(name: string): string {
   return name ? `${name[0].toUpperCase()}${name.slice(1)}` : name
 }
 
-function skillDescription(release: ReleaseManifest, name: string): string | undefined {
-  return release.skills[name]?.description
-}
-
 function humanList(values: string[]): string {
   if (values.length <= 1) return values[0] ?? ''
   if (values.length === 2) return `${values[0]} and ${values[1]}`
   return `${values.slice(0, -1).join(', ')}, and ${values.at(-1)}`
-}
-
-function requireRelease(release: ReleaseManifest | null): ReleaseManifest {
-  if (!release) throw new Error('no stable JLS release is currently available')
-  return release
 }
 
 async function fetchRelease(state: WizardState, message: string): Promise<ReleaseManifest> {
@@ -426,7 +411,9 @@ async function fetchRelease(state: WizardState, message: string): Promise<Releas
   const spinner = prompts.spinner({ withGuide: false })
   spinner.start(message)
   try {
-    return requireRelease(await fetchStableReleaseManifest())
+    const release = await fetchStableReleaseManifest()
+    if (!release) throw new Error('no stable JLS release is currently available')
+    return release
   } finally {
     spinner.clear()
   }
@@ -442,7 +429,7 @@ async function acknowledgeMissingDependencies(
   const missing = missingSkillDependencies(skills, release.skills, scope.root)
   if (missing.length === 0) return true
   prompts.note(missingDependenciesText(missing), 'Missing dependencies')
-  return chooseConfirmation(state, stepId)
+  return chooseYesNo(state, stepId, 'Continue?')
 }
 
 function instructionFiles(agents: string[], scope: Scope): string[] {
@@ -522,33 +509,8 @@ function collisionSummary(scope: Scope, collisions: InstallCollision[]): string 
   ].join('\n')
 }
 
-function wrapLogMessage(message: string): string {
-  const columns = typeof process.stdout.columns === 'number' && process.stdout.columns > 3
-    ? process.stdout.columns
-    : 80
-  const width = columns - 3
-  const words = message.trim().split(/\s+/)
-  const lines: string[] = []
-  let line = ''
-  for (const word of words) {
-    const candidate = line ? `${line} ${word}` : word
-    if (line && candidate.length > width) {
-      lines.push(line)
-      line = word
-    } else {
-      line = candidate
-    }
-  }
-  if (line) lines.push(line)
-  return lines.join('\n')
-}
-
 function installedVersions(group: InstallGroup): string[] {
   return [...new Set(group.targets.map((target) => target.version))].sort()
-}
-
-function stableVersions(release: ReleaseManifest): Record<string, string> {
-  return Object.fromEntries(Object.entries(release.skills).map(([name, skill]) => [name, skill.version]))
 }
 
 function updateAvailable(group: InstallGroup, available: Record<string, string>): boolean {
@@ -663,11 +625,6 @@ async function runLifecycleItem(
   }
 }
 
-function finishOperation(level: 'success' | 'info'): void {
-  if (level === 'success') prompts.log.success('Done.')
-  else prompts.log.info('Done.')
-}
-
 async function installAtScope(
   scope: Scope,
   state: WizardState,
@@ -688,7 +645,7 @@ async function installAtScope(
       return {
         value: skill,
         label: displaySkillName(skill),
-        description: skillDescription(release, skill),
+        description: release.skills[skill]?.description,
         disabled: installedEverywhere,
         disabledSuffix: installedEverywhere ? ' (installed)' : undefined,
       }
@@ -758,11 +715,10 @@ async function installAtScope(
         continue skillStep
       }
 
-      const packages = new Map<string, Awaited<ReturnType<typeof import('./installer-updater')['downloadSkillPackage']>>>()
+      const packages = new Map<string, DownloadedSkillPackage>()
       const spinner = prompts.spinner({ withGuide: false })
       spinner.start('Preparing selected skills')
       try {
-        const { downloadSkillPackage } = await import('./installer-updater')
         for (const skill of selectedSkills) packages.set(skill, await downloadSkillPackage(skill, release.skills[skill]))
       } finally {
         spinner.clear()
@@ -801,7 +757,7 @@ async function installAtScope(
                 capable.map((skill) => ({
                   value: skill,
                   label: displaySkillName(skill),
-                  description: skillDescription(release, skill),
+                  description: release.skills[skill]?.description,
                 })),
                 { allowBack: true, required: false, initialValues: capable },
               )
@@ -814,7 +770,7 @@ async function installAtScope(
           }
 
           prompts.note(installSummary(scope, selectedSkills), 'The following skills will be installed:')
-          const proceed = await chooseConfirmation(state, `${prefix}.confirm`)
+          const proceed = await chooseYesNo(state, `${prefix}.confirm`, 'Continue?')
           if (proceed === BACK_SIGNAL) {
             if (capable.length > 0) continue instructionStep
             if (harnessWasPrompted) continue harnessStep
@@ -850,7 +806,7 @@ async function installAtScope(
             ])
             if (!success) return 1
           }
-          finishOperation('success')
+          prompts.log.success('Done.')
           return 0
         }
       } finally {
@@ -862,7 +818,9 @@ async function installAtScope(
 
 async function updateAtScope(scope: Scope, state: WizardState, prefix: string): Promise<NavResult<number>> {
   const release = await fetchRelease(state, 'Checking for updates')
-  const availableVersions = stableVersions(release)
+  const availableVersions = Object.fromEntries(
+    Object.entries(release.skills).map(([name, skill]) => [name, skill.version]),
+  )
   const installed = discoverInstallations(scope)
   const available = installed.filter((group) => updateAvailable(group, availableVersions))
   if (available.length === 0) {
@@ -905,7 +863,6 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
     const spinner = prompts.spinner({ withGuide: false })
     spinner.start('Preparing selected updates')
     try {
-      const { downloadSkillPackage } = await import('./installer-updater')
       for (const { group } of targets) {
         packages.set(group.skill, await downloadSkillPackage(group.skill, release.skills[group.skill]))
       }
@@ -950,7 +907,7 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
         ])
         if (!success) return 1
       }
-      finishOperation('success')
+      prompts.log.success('Done.')
       return 0
     } finally {
       for (const pkg of packages.values()) pkg.cleanup()
@@ -1054,7 +1011,7 @@ async function uninstallAtScope(scope: Scope, state: WizardState, prefix: string
       }
 
       prompts.note(uninstallSummary(scope, groups, removeData), 'The following skills will be uninstalled:')
-      const proceed = await chooseConfirmation(state, `${prefix}.confirm`, true)
+      const proceed = await chooseYesNo(state, `${prefix}.confirm`, 'Continue?', true)
       if (proceed === BACK_SIGNAL) {
         if (cleanupGroups.length > 0) continue cleanupStep
         continue skillStep
@@ -1075,22 +1032,10 @@ async function uninstallAtScope(scope: Scope, state: WizardState, prefix: string
         )
         if (!success) return 1
       }
-      finishOperation('success')
+      prompts.log.success('Done.')
       return 0
     }
   }
-}
-
-export function scopeActionOptions(hasInstalled: boolean): NavOption<string>[] {
-  return [
-    { value: 'install', label: 'Install new skills' },
-    ...(hasInstalled
-      ? [
-          { value: 'update', label: 'Check for updates' },
-          { value: 'uninstall', label: 'Uninstall existing skills' },
-        ]
-      : []),
-  ]
 }
 
 async function manageScopeWizard(scope: Scope, state: WizardState): Promise<NavResult<number>> {
@@ -1107,7 +1052,11 @@ async function manageScopeWizard(scope: Scope, state: WizardState): Promise<NavR
       state,
       `${prefix}.action`,
       'What would you like to do?',
-      scopeActionOptions(true),
+      [
+        { value: 'install', label: 'Install new skills' },
+        { value: 'update', label: 'Check for updates' },
+        { value: 'uninstall', label: 'Uninstall existing skills' },
+      ],
       { allowBack: true, initialValue: 'install' },
     )
     if (choice === BACK_SIGNAL) return BACK_SIGNAL
@@ -1164,7 +1113,7 @@ async function uninstallInstallerWizard(state: WizardState): Promise<NavResult<n
   ensureIntro(state)
   const executable = installerExecutable()
   prompts.note('This will uninstall the current installer binary file from the location you launched it from and remove installer-owned metadata and tooling. Doing so will immediately end the current session. It will not, however, remove or uninstall any currently installed skills, agent files, agent instruction injections, skill runtimes, or generated data from skills.')
-  const proceed = await chooseConfirmation(state, 'installer-uninstall.confirm', true)
+  const proceed = await chooseYesNo(state, 'installer-uninstall.confirm', 'Continue?', true)
   if (proceed === BACK_SIGNAL) return BACK_SIGNAL
 
   const spinner = prompts.spinner({ withGuide: false })
@@ -1251,14 +1200,3 @@ export async function main(): Promise<number> {
   return bareWizard()
 }
 
-if (import.meta.main) {
-  const interactive = process.argv.slice(2).length === 0 && process.stdout.isTTY
-  main()
-    .then((exitCode) => { process.exitCode = exitCode })
-    .catch((error) => {
-      const message = `jls: ${error instanceof Error ? error.message : String(error)}`
-      if (interactive) prompts.log.error(message)
-      else console.error(message)
-      process.exitCode = 1
-    })
-}
