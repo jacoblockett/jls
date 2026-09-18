@@ -712,11 +712,11 @@ function matchingGroups(parsed: ParsedAction, scope: Scope): InstallGroup[] {
 async function updateCommand(args: string[]): Promise<number> {
   const parsed = parseAction(args, 'update')
   const scope = requireScope(parsed)
-  const release = requireRelease(await fetchStableReleaseManifest())
   const groups = matchingGroups(parsed, scope)
   if (parsed.skills.length > 0 && groups.length === 0) {
     throw new Error('no installations match update filters')
   }
+  const release = requireRelease(await fetchStableReleaseManifest())
 
   for (const group of groups) {
     const released = release.skills[group.skill]
