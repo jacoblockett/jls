@@ -380,6 +380,54 @@ describe('skill package contract', () => {
     }
   })
 
+  test('portable packages may carry portable managed tools', async () => {
+    const root = reset('portable-tool-package')
+    const packageRoot = join(root, 'package')
+    mkdirSync(join(packageRoot, 'tools'), { recursive: true })
+    const packageManifest = {
+      name: 'example-skill',
+      version: '1.2.3',
+      min_installer: '0.7.0',
+      description: 'Example',
+      skill_files: ['SKILL.md'],
+      tools: {
+        helper: {
+          artifacts: { portable: 'tools/helper' },
+          token: 'HELPER_CLI',
+        },
+      },
+    }
+    writeFileSync(join(packageRoot, 'manifest.json'), `${JSON.stringify(packageManifest, null, 2)}\n`)
+    writeFileSync(join(packageRoot, 'SKILL.md'), '# Example Skill\n')
+    writeFileSync(join(packageRoot, 'tools', 'helper'), '#!/usr/bin/env sh\n')
+
+    const zip = new AdmZip()
+    zip.addLocalFolder(packageRoot)
+    const bytes = new Uint8Array(zip.toBuffer())
+    const released: ReleasedSkill = {
+      version: '1.2.3',
+      min_installer: '0.7.0',
+      artifacts: {
+        portable: {
+          url: 'https://fixture.invalid/example-skill.zip',
+          sha256: sha256(bytes),
+        },
+      },
+    }
+
+    const downloaded = await downloadSkillPackage(
+      'example-skill',
+      released,
+      fixtureFetcher({}, {}, bytes),
+      'windows-x64',
+    )
+    try {
+      expect(packageTools(downloaded.manifest).helper?.artifacts.portable).toBe('tools/helper')
+    } finally {
+      downloaded.cleanup()
+    }
+  })
+
   test('download verifies and extracts a referenced package', async () => {
     const root = reset('package')
     const packageRoot = join(root, 'package')
