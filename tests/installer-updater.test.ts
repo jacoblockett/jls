@@ -346,6 +346,49 @@ describe('skill package contract', () => {
     )).rejects.toThrow()
   })
 
+  test('target packages reject tool/support-file destination overlap', async () => {
+    const root = reset('overlapping-tool-package')
+    const packageRoot = join(root, 'package')
+    mkdirSync(join(packageRoot, 'tools'), { recursive: true })
+    mkdirSync(join(packageRoot, 'bin'), { recursive: true })
+    const packageManifest = {
+      name: 'example-skill',
+      version: '1.2.3',
+      min_installer: '0.7.0',
+      description: 'Example',
+      skill_files: ['SKILL.md'],
+      tools: {
+        helper: { artifacts: { portable: 'tools/helper' }, token: 'HELPER_CLI' },
+      },
+      tool_files: ['bin/helper'],
+    }
+    writeFileSync(join(packageRoot, 'manifest.json'), `${JSON.stringify(packageManifest, null, 2)}\n`)
+    writeFileSync(join(packageRoot, 'SKILL.md'), '# Example Skill\n')
+    writeFileSync(join(packageRoot, 'tools', 'helper'), 'tool')
+    writeFileSync(join(packageRoot, 'bin', 'helper'), 'support')
+
+    const zip = new AdmZip()
+    zip.addLocalFolder(packageRoot)
+    const bytes = new Uint8Array(zip.toBuffer())
+    const released: ReleasedSkill = {
+      version: '1.2.3',
+      min_installer: '0.7.0',
+      artifacts: {
+        portable: {
+          url: 'https://fixture.invalid/example-skill.zip',
+          sha256: sha256(bytes),
+        },
+      },
+    }
+
+    await expect(downloadSkillPackage(
+      'example-skill',
+      released,
+      fixtureFetcher({}, {}, bytes),
+      'windows-x64',
+    )).rejects.toThrow()
+  })
+
   test('legacy ownership_marker fields are ignored rather than becoming runtime ownership state', () => {
     const parsed = parseSkillPackageManifest({
       name: 'example-skill',
