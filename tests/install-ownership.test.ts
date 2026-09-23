@@ -16,6 +16,7 @@ function runtimePackage(root = ''): any {
       description: 'test',
       skill_files: ['SKILL.md'],
       runtime: 'rust',
+      runtime_artifacts: { 'windows-x64': 'runtime/windows-x64/map.exe' },
       runtime_cli: 'map',
       runtime_files: ['schema.surql'],
     },
