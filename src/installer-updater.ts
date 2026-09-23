@@ -84,6 +84,11 @@ export type GeneratedDataSpec = {
 
 export type HarnessResources = Record<string, Record<string, string[]>>
 
+export type SkillTool = {
+  artifacts: Record<string, string>
+  token?: string
+}
+
 export type SkillPackageManifest = {
   name: string
   version: string
@@ -92,6 +97,10 @@ export type SkillPackageManifest = {
   dependencies?: SkillDependency[]
   skill_files: string[]
   harness_resources?: HarnessResources
+  tools?: Record<string, SkillTool>
+  tool_files?: string[]
+  // Legacy singular-runtime fields remain accepted so existing skill releases
+  // install unchanged while the generic tool model becomes the package contract.
   runtime_files?: string[]
   runtime?: string
   runtime_artifacts?: Record<string, string>
@@ -394,6 +403,57 @@ function pathRecord(value: unknown, label: string): Record<string, string> | und
   return result
 }
 
+function parseTools(value: unknown, label: string): Record<string, SkillTool> | undefined {
+  if (value === undefined) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`)
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length === 0) throw new Error(`${label} must contain at least one tool`)
+
+  const result: Record<string, SkillTool> = {}
+  const tokens = new Set<string>()
+  for (const [name, rawTool] of entries) {
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error(`${label} has invalid tool name ${name}`)
+    if (!rawTool || typeof rawTool !== 'object' || Array.isArray(rawTool)) {
+      throw new Error(`${label}.${name} must be an object`)
+    }
+    const raw = rawTool as Record<string, unknown>
+    const artifacts = pathRecord(raw.artifacts, `${label}.${name}.artifacts`)
+    if (!artifacts || Object.keys(artifacts).length === 0) {
+      throw new Error(`${label}.${name}.artifacts must contain at least one artifact`)
+    }
+    for (const target of Object.keys(artifacts)) {
+      if (!isTargetKey(target)) throw new Error(`${label}.${name}.artifacts has invalid target ${target}`)
+    }
+
+    const token = optionalString(raw.token, `${label}.${name}.token`)
+    if (token && !/^[A-Z][A-Z0-9_]*$/.test(token)) {
+      throw new Error(`${label}.${name}.token must be an uppercase token name`)
+    }
+    if (token && tokens.has(token)) throw new Error(`${label} reuses token ${token}`)
+    if (token) tokens.add(token)
+    result[name] = { artifacts, ...(token ? { token } : {}) }
+  }
+  return result
+}
+
+export function packageTools(manifest: SkillPackageManifest): Record<string, SkillTool> {
+  if (manifest.tools) return manifest.tools
+  if (!manifest.runtime) return {}
+  if (!manifest.runtime_cli || !manifest.runtime_artifacts) {
+    throw new Error(`${manifest.name} legacy runtime is missing runtime_cli or runtime_artifacts`)
+  }
+  return {
+    [manifest.runtime_cli]: {
+      artifacts: manifest.runtime_artifacts,
+      token: manifest.cli_token || 'JL_SKILL_CLI',
+    },
+  }
+}
+
+export function packageToolFiles(manifest: SkillPackageManifest): string[] {
+  return manifest.tool_files ?? manifest.runtime_files ?? []
+}
+
 function harnessResources(value: unknown, label: string): HarnessResources | undefined {
   if (value === undefined) return undefined
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`)
@@ -439,6 +499,26 @@ export function parseSkillPackageManifest(value: unknown): SkillPackageManifest 
       })
     })()
 
+  const tools = parseTools(raw.tools, `${raw.name} tools`)
+  const toolFiles = pathArray(raw.tool_files, `${raw.name} tool_files`)
+  const hasLegacyRuntime = raw.runtime !== undefined
+    || raw.runtime_artifacts !== undefined
+    || raw.runtime_cli !== undefined
+    || raw.cli_token !== undefined
+    || raw.runtime_files !== undefined
+  if ((tools || toolFiles) && hasLegacyRuntime) {
+    throw new Error(`${raw.name} cannot mix tools/tool_files with legacy runtime fields`)
+  }
+
+  const runtime = optionalString(raw.runtime, `${raw.name} runtime`)
+  const runtimeArtifacts = pathRecord(raw.runtime_artifacts, `${raw.name} runtime_artifacts`)
+  const runtimeCli = optionalString(raw.runtime_cli, `${raw.name} runtime_cli`)
+  const cliToken = optionalString(raw.cli_token, `${raw.name} cli_token`)
+  const runtimeFiles = pathArray(raw.runtime_files, `${raw.name} runtime_files`)
+  if (hasLegacyRuntime && (!runtime || !runtimeArtifacts || !runtimeCli)) {
+    throw new Error(`${raw.name} legacy runtime requires runtime, runtime_artifacts, and runtime_cli`)
+  }
+
   return {
     name: raw.name,
     version: raw.version,
@@ -447,11 +527,13 @@ export function parseSkillPackageManifest(value: unknown): SkillPackageManifest 
     dependencies: parseDependencies(raw.dependencies, `${raw.name} dependencies`),
     skill_files: pathArray(raw.skill_files, `${raw.name} skill_files`, true)!,
     harness_resources: harnessResources(raw.harness_resources, `${raw.name} harness_resources`),
-    runtime_files: pathArray(raw.runtime_files, `${raw.name} runtime_files`),
-    runtime: optionalString(raw.runtime, `${raw.name} runtime`),
-    runtime_artifacts: pathRecord(raw.runtime_artifacts, `${raw.name} runtime_artifacts`),
-    runtime_cli: optionalString(raw.runtime_cli, `${raw.name} runtime_cli`),
-    cli_token: optionalString(raw.cli_token, `${raw.name} cli_token`),
+    tools,
+    tool_files: toolFiles,
+    runtime_files: runtimeFiles,
+    runtime,
+    runtime_artifacts: runtimeArtifacts,
+    runtime_cli: runtimeCli,
+    cli_token: cliToken,
     instruction_fragment: raw.instruction_fragment === undefined
       ? undefined
       : containedPath(raw.instruction_fragment, `${raw.name} instruction_fragment`),
@@ -463,8 +545,8 @@ function assertPackageFiles(root: string, manifest: SkillPackageManifest): void 
   const declared = new Set<string>([
     ...manifest.skill_files,
     ...Object.values(manifest.harness_resources ?? {}).flatMap((resources) => Object.values(resources).flat()),
-    ...(manifest.runtime_files ?? []),
-    ...Object.values(manifest.runtime_artifacts ?? {}),
+    ...packageToolFiles(manifest),
+    ...Object.values(packageTools(manifest)).flatMap((tool) => Object.values(tool.artifacts)),
     ...(manifest.instruction_fragment ? [manifest.instruction_fragment] : []),
   ])
   // Install manifests define the exact leaf files JLS may manage. Allowing a
@@ -480,14 +562,16 @@ function assertPackageFiles(root: string, manifest: SkillPackageManifest): void 
 }
 
 function assertPackageTarget(name: string, manifest: SkillPackageManifest, selected: TargetKey | 'portable'): void {
-  const runtimeTargets = Object.keys(manifest.runtime_artifacts ?? {})
+  const tools = packageTools(manifest)
   if (selected === 'portable') {
-    if (runtimeTargets.length > 0) throw new Error(`${name} portable package cannot contain target-specific runtime artifacts`)
+    if (Object.keys(tools).length > 0) throw new Error(`${name} portable package cannot contain target-specific tools`)
     return
   }
-  if (!manifest.runtime) return
-  if (runtimeTargets.length !== 1 || runtimeTargets[0] !== selected) {
-    throw new Error(`${name} ${selected} package must contain only its ${selected} runtime artifact`)
+  for (const [toolName, tool] of Object.entries(tools)) {
+    const targets = Object.keys(tool.artifacts)
+    if (targets.length !== 1 || targets[0] !== selected) {
+      throw new Error(`${name} ${selected} package tool ${toolName} must contain only its ${selected} artifact`)
+    }
   }
 }
 
