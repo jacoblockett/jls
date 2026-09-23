@@ -1071,7 +1071,7 @@ async function updateInstallerWizard(state: WizardState): Promise<NavResult<numb
 async function uninstallInstallerWizard(state: WizardState): Promise<NavResult<number>> {
   ensureIntro(state)
   const executable = installerExecutable()
-  prompts.note('This will uninstall the current installer binary file from the location you launched it from and remove installer-owned metadata and tooling. Doing so will immediately end the current session. It will not, however, remove or uninstall any currently installed skills, agent files, agent instruction injections, skill runtimes, or generated data from skills.')
+  prompts.note('This will uninstall the current installer binary file from the location you launched it from and remove installer-owned metadata and tooling. Doing so will immediately end the current session. It will not, however, remove or uninstall any currently installed skills, agent files, agent instruction injections, skill-managed tools, or generated data from skills.')
   const proceed = await chooseYesNo(state, 'installer-uninstall.confirm', 'Continue?', true)
   if (proceed === BACK_SIGNAL) return BACK_SIGNAL
 
