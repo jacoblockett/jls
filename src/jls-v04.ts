@@ -286,8 +286,10 @@ function skillFilesPresent(skillPath: string, manifest: SkillPackageManifest): b
 
 function toolFilesPresent(manifest: SkillPackageManifest, scope: Scope): boolean {
   const root = join(scope.root, '.jls', manifest.name)
-  for (const name of Object.keys(packageTools(manifest))) {
-    const executable = join(root, 'bin', `${name}${isWindows ? '.exe' : ''}`)
+  for (const tool of Object.values(packageTools(manifest))) {
+    const artifacts = Object.values(tool.artifacts)
+    if (artifacts.length !== 1) return false
+    const executable = join(root, 'bin', basename(artifacts[0]!))
     if (!existsSync(executable) || !statSync(executable).isFile()) return false
   }
   for (const rel of packageToolFiles(manifest)) {
