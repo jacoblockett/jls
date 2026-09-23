@@ -23,6 +23,8 @@ import {
   downloadSkillPackage,
   fetchStableReleaseManifest,
   INSTALLER_COMPATIBILITY_VERSION,
+  packageToolFiles,
+  packageTools,
   parseSkillPackageManifest,
   type DownloadedSkillPackage,
   type ReleaseManifest,
@@ -89,12 +91,12 @@ type HarnessResourceTarget = {
 }
 
 
-function runtimeMetaRoot(scopeRoot: string): string {
+function toolMetaRoot(scopeRoot: string): string {
   return join(scopeRoot, '.jls')
 }
 
-function runtimeSkillRoot(scopeRoot: string, skill: string): string {
-  return join(runtimeMetaRoot(scopeRoot), skill)
+function skillToolRoot(scopeRoot: string, skill: string): string {
+  return join(toolMetaRoot(scopeRoot), skill)
 }
 
 function resolveScope(raw: string): Scope {
@@ -305,18 +307,25 @@ function discoverInstallations(scope: Scope): InstallGroup[] {
     .sort((a, b) => a.key.localeCompare(b.key))
 }
 
-function runtimeCliPath(manifest: Manifest, scope: Scope): string {
-  if (!manifest.runtime_cli) throw new Error(`${manifest.name} manifest is missing runtime_cli`)
-  return join(runtimeSkillRoot(scope.root, manifest.name), 'bin', `${manifest.runtime_cli}${compiledTarget().executableSuffix}`)
+function toolExecutablePath(manifest: Manifest, scope: Scope, toolName: string): string {
+  return join(skillToolRoot(scope.root, manifest.name), 'bin', `${toolName}${compiledTarget().executableSuffix}`)
 }
 
-function runtimeFiles(manifest: Manifest, scope: Scope): string[] {
-  if (!manifest.runtime) return []
-  const root = runtimeSkillRoot(scope.root, manifest.name)
+function installedToolFiles(manifest: Manifest, scope: Scope): string[] {
+  const root = skillToolRoot(scope.root, manifest.name)
   return [
-    ...(manifest.runtime_cli ? [runtimeCliPath(manifest, scope)] : []),
-    ...(manifest.runtime_files ?? []).map((rel) => join(root, rel)),
+    ...Object.keys(packageTools(manifest)).map((name) => toolExecutablePath(manifest, scope, name)),
+    ...packageToolFiles(manifest).map((rel) => join(root, rel)),
   ]
+}
+
+function toolTokens(manifest: Manifest, scope: Scope): Record<string, string> {
+  const tokens: Record<string, string> = {}
+  for (const [name, tool] of Object.entries(packageTools(manifest))) {
+    if (!tool.token) continue
+    tokens[`{{${tool.token}}}`] = normalize(toolExecutablePath(manifest, scope, name))
+  }
+  return tokens
 }
 
 function previousManifestForSkill(scope: Scope, skill: string): Manifest | undefined {
@@ -336,11 +345,11 @@ function removeLegacyOwnershipMarkers(manifest: Manifest, scope: Scope): void {
   // Legacy marker cleanup is migration-only. A matching filename alone never
   // establishes ownership, so foreign or malformed files are preserved.
   removeLegacyOwnershipMarker(
-    join(runtimeMetaRoot(scope.root), '.jls-owned.json'),
+    join(toolMetaRoot(scope.root), '.jls-owned.json'),
     { kind: 'runtime-root' },
   )
   removeLegacyOwnershipMarker(
-    join(runtimeSkillRoot(scope.root, manifest.name), '.jls-owned.json'),
+    join(skillToolRoot(scope.root, manifest.name), '.jls-owned.json'),
     { kind: 'skill-runtime', skill: manifest.name },
   )
   for (const spec of manifest.generated_data ?? []) {
@@ -351,10 +360,10 @@ function removeLegacyOwnershipMarkers(manifest: Manifest, scope: Scope): void {
   }
 }
 
-function removeObsoleteRuntimeFiles(previous: Manifest | undefined, next: Manifest, scope: Scope): void {
+function removeObsoleteToolFiles(previous: Manifest | undefined, next: Manifest, scope: Scope): void {
   if (!previous) return
-  const nextFiles = new Set(runtimeFiles(next, scope).map((path) => normalizedPath(resolve(path))))
-  for (const path of runtimeFiles(previous, scope)) {
+  const nextFiles = new Set(installedToolFiles(next, scope).map((path) => normalizedPath(resolve(path))))
+  for (const path of installedToolFiles(previous, scope)) {
     if (!nextFiles.has(normalizedPath(resolve(path)))) removeFile(path)
   }
 }
@@ -371,14 +380,16 @@ function removeSkillFiles(manifest: Manifest, destination: string): void {
   removeFile(join(destination, 'manifest.json'))
 }
 
-function renderInstructionFragment(pkg: DownloadedSkillPackage, cli?: string): string {
+function renderInstructionFragment(
+  pkg: DownloadedSkillPackage,
+  tokens: Record<string, string>,
+): string {
   const manifest = pkg.manifest
   if (!manifest.instruction_fragment) return ''
-  const tokenName = manifest.cli_token || 'JL_SKILL_CLI'
-  const tokens = cli ? { [`{{${tokenName}}}`]: normalize(cli) } : {}
-  return Object.entries(tokens).reduce(
-    (text, [from, to]) => text.replaceAll(from, to),
+  return renderResource(
     readFileSync(join(pkg.root, manifest.instruction_fragment), 'utf8'),
+    tokens,
+    manifest.instruction_fragment,
   )
 }
 
@@ -389,27 +400,28 @@ function assertInstallCollisions(pkg: DownloadedSkillPackage, scope: Scope, targ
   throw new Error(`installation collides with existing file/path: ${paths}`)
 }
 
-function provisionRuntime(
+function provisionTools(
   pkg: DownloadedSkillPackage,
   scope: Scope,
   previous: Manifest | undefined,
-): { cli?: string } {
+): Record<string, string> {
   const manifest = pkg.manifest
-  removeObsoleteRuntimeFiles(previous, manifest, scope)
+  removeObsoleteToolFiles(previous, manifest, scope)
   removeLegacyOwnershipMarkers(previous ?? manifest, scope)
-  if (!manifest.runtime) return {}
-  if (manifest.runtime !== 'rust') throw new Error(`unsupported runtime "${manifest.runtime}"`)
-  if (!manifest.runtime_cli) throw new Error(`${manifest.name} manifest is missing runtime_cli`)
-  const target = compiledTarget().key
-  const artifact = manifest.runtime_artifacts?.[target]
-  if (!artifact) throw new Error(`${manifest.name} has no bundled runtime for ${target}`)
 
-  const root = runtimeSkillRoot(scope.root, manifest.name)
-  const cli = runtimeCliPath(manifest, scope)
-  copyPackageEntry(join(pkg.root, artifact), cli)
-  try { chmodSync(cli, 0o755) } catch {}
-  for (const rel of manifest.runtime_files ?? []) copyPackageEntry(join(pkg.root, rel), join(root, rel))
-  return { cli }
+  const target = compiledTarget().key
+  const root = skillToolRoot(scope.root, manifest.name)
+  for (const [name, tool] of Object.entries(packageTools(manifest))) {
+    const artifact = tool.artifacts[target]
+    if (!artifact) throw new Error(`${manifest.name} tool ${name} has no bundled artifact for ${target}`)
+    const executable = toolExecutablePath(manifest, scope, name)
+    copyPackageEntry(join(pkg.root, artifact), executable)
+    try { chmodSync(executable, 0o755) } catch {}
+  }
+  for (const rel of packageToolFiles(manifest)) {
+    copyPackageEntry(join(pkg.root, rel), join(root, rel))
+  }
+  return toolTokens(manifest, scope)
 }
 
 function cachePackageManifest(pkg: DownloadedSkillPackage): void {
@@ -424,10 +436,8 @@ function installTargets(
 ): void {
   assertInstallCollisions(pkg, scope, targets)
   const previousPackage = previousManifestForSkill(scope, pkg.manifest.name)
-  const runtime = provisionRuntime(pkg, scope, previousPackage)
-  const tokenName = pkg.manifest.cli_token || 'JL_SKILL_CLI'
-  const tokens = runtime.cli ? { [`{{${tokenName}}}`]: normalize(runtime.cli) } : {}
-  const fragment = renderInstructionFragment(pkg, runtime.cli)
+  const tokens = provisionTools(pkg, scope, previousPackage)
+  const fragment = renderInstructionFragment(pkg, tokens)
 
   for (const target of targets) {
     const paths = agentPaths(target.agent, scope)
@@ -456,8 +466,7 @@ function configureInstruction(pkg: DownloadedSkillPackage, scope: Scope, target:
   const paths = agentPaths(target.agent, scope)
   assertManagedBlockWritable(paths.instruction, pkg.manifest.name)
   if (target.requestedInstructions) {
-    const cli = pkg.manifest.runtime ? runtimeCliPath(pkg.manifest, scope) : undefined
-    const fragment = renderInstructionFragment(pkg, cli)
+    const fragment = renderInstructionFragment(pkg, toolTokens(pkg.manifest, scope))
     if (!fragment) throw new Error(`${pkg.manifest.name} does not provide managed instructions`)
     managedBlock(paths.instruction, pkg.manifest.name, fragment)
   } else {
@@ -467,13 +476,13 @@ function configureInstruction(pkg: DownloadedSkillPackage, scope: Scope, target:
 }
 
 function uninstallGroup(group: InstallGroup): void {
-  let runtimeManifest: Manifest | undefined
+  let toolManifest: Manifest | undefined
   for (const target of group.targets) {
     const manifest = installedPackageManifest(target.skillPath)
     if (!manifest || manifest.name !== group.skill) {
       throw new Error(`refusing to uninstall skill path without its matching manifest: ${displayManagedPath(group.scope.root, target.skillPath)}`)
     }
-    if (manifest.runtime && !runtimeManifest) runtimeManifest = manifest
+    if (installedToolFiles(manifest, group.scope).length > 0 && !toolManifest) toolManifest = manifest
     const paths = agentPaths(target.agent, group.scope)
     const resourceContainers = harnessResourceTargets(manifest, target.agent, group.scope)
       .map(({ destination }) => dirname(destination))
@@ -495,16 +504,16 @@ function uninstallGroup(group: InstallGroup): void {
   }
 
   if (!discoverInstallations(group.scope).some((candidate) => candidate.skill === group.skill)) {
-    const manifest = runtimeManifest ?? cachedPackageManifest(group.skill)
+    const manifest = toolManifest ?? cachedPackageManifest(group.skill)
     if (manifest) {
-      const files = runtimeFiles(manifest, group.scope)
+      const files = installedToolFiles(manifest, group.scope)
       for (const path of files) removeFile(path)
       removeLegacyOwnershipMarkers(manifest, group.scope)
-      const runtimeRoot = runtimeSkillRoot(group.scope.root, manifest.name)
+      const toolRoot = skillToolRoot(group.scope.root, manifest.name)
       pruneEmptyContainers([
-        ...files.flatMap((path) => containerAncestors(path, runtimeRoot)),
-        runtimeRoot,
-        runtimeMetaRoot(group.scope.root),
+        ...files.flatMap((path) => containerAncestors(path, toolRoot)),
+        toolRoot,
+        toolMetaRoot(group.scope.root),
       ])
     }
     removeFile(cachedManifestPath(group.skill))
