@@ -287,7 +287,7 @@ A successful installer update intentionally ends the current session; the user r
 The note is exactly:
 
 ```text
-This will uninstall the current installer binary file from the location you launched it from and remove installer-owned metadata and tooling. Doing so will immediately end the current session. It will not, however, remove or uninstall any currently installed skills, agent files, agent instruction injections, skill runtimes, or generated data from skills.
+This will uninstall the current installer binary file from the location you launched it from and remove installer-owned metadata and tooling. Doing so will immediately end the current session. It will not, however, remove or uninstall any currently installed skills, agent files, agent instruction injections, skill-managed tools, or generated data from skills.
 ```
 
 The semantic contract is:
@@ -295,7 +295,7 @@ The semantic contract is:
 1. identify the exact running installer with `process.execPath`;
 2. remove that exact binary;
 3. remove only JLS installer-owned metadata/state/tooling;
-4. preserve installed skills, harness resources, managed instruction injections, skill runtimes, and generated skill data;
+4. preserve installed skills, harness resources, managed instruction injections, skill-managed tools, and generated skill data;
 5. verify filesystem postconditions;
 6. report success only after verified cleanup and report an explicit error otherwise.
 
@@ -318,19 +318,23 @@ A package may declare:
 - name/version/description;
 - skill files;
 - harness-specific resources;
-- runtime kind/artifacts/support files;
-- runtime CLI/token;
+- zero or more installer-managed tools, each with target-specific artifacts and an optional resource token;
+- installer-managed support files shared by those tools;
 - managed instruction fragment;
 - path-owned generated data;
 - bounded non-path generated cleanup semantics.
 
 Unknown future fields may be ignored only where doing so is safe. New cleanup semantics must never be represented as an unsafe fake filesystem path for backward compatibility.
 
-Downloaded package archives are hash-verified before extraction. Package-declared paths are containment-validated. Installer-owned runtime and generated-data paths use explicit ownership evidence before destructive replacement or cleanup.
+Downloaded package archives are hash-verified before extraction. Package-declared paths are containment-validated. Installer-managed tool and generated-data paths use explicit ownership evidence before destructive replacement or cleanup.
+
+Managed tools are package-declared individually. JLS installs each declared tool under the skill's managed `.jls/<skill>/bin/` container, substitutes only its declared token into skill/harness resources, and owns only the exact declared executable/support-file leaves. A skill may declare any number of tools. Tool implementation language is not an installer concern.
+
+The legacy singular `runtime` / `runtime_artifacts` / `runtime_cli` / `cli_token` / `runtime_files` fields remain accepted for already-released skills and normalize internally to the same tool model. New packages should use `tools` and `tool_files`. A package must not mix the two declaration styles.
 
 ## Release model
 
-JLS builds only the installer. Skill repositories own their skill packages and runtime builds.
+JLS builds only the installer. Skill repositories own their skill packages and managed-tool builds.
 
 The JLS stable release manifest references externally owned skill release manifests. Artifact selection is exact current target first, then an explicit `portable` fallback for skills only.
 
