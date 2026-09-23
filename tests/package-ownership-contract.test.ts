@@ -37,6 +37,47 @@ describe('file-explicit package ownership contract', () => {
     expect(manifest.generated_data).toEqual([{ path: '.example', marker: 'project.json' }])
   })
 
+  test('tool declarations own exact executable and support-file leaves', async () => {
+    const manifest = {
+      ...baseManifest(),
+      tools: {
+        history: {
+          artifacts: { 'windows-x64': 'tools/windows-x64/history.exe' },
+          token: 'HISTORY_CLI',
+        },
+        screenshot: {
+          artifacts: { 'windows-x64': 'tools/windows-x64/screenshot.exe' },
+          token: 'SCREENSHOT_CLI',
+        },
+      },
+      tool_files: ['support/browser.dat'],
+    }
+    const zip = new AdmZip()
+    zip.addFile('manifest.json', Buffer.from(`${JSON.stringify(manifest)}\n`))
+    zip.addFile('SKILL.md', Buffer.from('# Skill\n'))
+    zip.addFile('tools/windows-x64/history.exe', Buffer.from('history'))
+    zip.addFile('tools/windows-x64/screenshot.exe', Buffer.from('screenshot'))
+    zip.addFile('support/browser.dat', Buffer.from('support'))
+    const bytes = new Uint8Array(zip.toBuffer())
+    const sha256 = createHash('sha256').update(bytes).digest('hex')
+    const released: ReleasedSkill = {
+      version: '1.2.3',
+      min_installer: '0.3.2',
+      artifacts: {
+        'windows-x64': { url: 'https://fixture.invalid/example.zip', sha256 },
+      },
+    }
+    const fetcher = (async () => new Response(bytes)) as typeof fetch
+
+    const downloaded = await downloadSkillPackage(
+      'example-skill',
+      released,
+      fetcher,
+      'windows-x64',
+    )
+    downloaded.cleanup()
+  })
+
   test('installation declarations may name exact files but not directories', async () => {
     const manifest = { ...baseManifest(), skill_files: ['assets'] }
     const zip = new AdmZip()
