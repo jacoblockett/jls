@@ -318,7 +318,7 @@ A package may declare:
 - name/version/description;
 - skill files;
 - harness-specific resources;
-- zero or more installer-managed tools, each with target-specific artifacts and an optional resource token;
+- zero or more installer-managed tools, each with target-specific or portable artifacts and an optional resource token;
 - installer-managed support files shared by those tools;
 - managed instruction fragment;
 - path-owned generated data;
@@ -328,7 +328,7 @@ Unknown future fields may be ignored only where doing so is safe. New cleanup se
 
 Downloaded package archives are hash-verified before extraction. Package-declared paths are containment-validated. Installer-managed tool and generated-data paths use explicit ownership evidence before destructive replacement or cleanup.
 
-Managed tools are package-declared individually. JLS installs each declared tool under the skill's managed `.jls/<skill>/bin/` container, substitutes only its declared token into skill/harness resources, and owns only the exact declared executable/support-file leaves. A skill may declare any number of tools. Tool implementation language is not an installer concern.
+Managed tools are package-declared individually. JLS installs each declared tool under the skill's managed `.jls/<skill>/bin/` container using the packaged artifact filename, substitutes only its declared token into skill/harness resources, and owns only the exact declared tool/support-file leaves. A skill may declare any number of tools. Tools may be target-specific or portable; implementation language and filename extension are not installer concerns.
 
 The legacy singular `runtime` / `runtime_artifacts` / `runtime_cli` / `cli_token` / `runtime_files` fields remain accepted for already-released skills and normalize internally to the same tool model. New packages should use `tools` and `tool_files`. A package must not mix the two declaration styles.
 
