@@ -564,7 +564,13 @@ function assertPackageFiles(root: string, manifest: SkillPackageManifest): void 
 }
 
 function assertPackageTarget(name: string, manifest: SkillPackageManifest, selected: TargetKey | 'portable'): void {
-  const destinations = new Set<string>()
+  const supportFiles = packageToolFiles(manifest)
+  const supportSet = new Set(supportFiles)
+  if (supportSet.size !== supportFiles.length) {
+    throw new Error(`${name} package repeats a managed support-file path`)
+  }
+
+  const destinations = new Set<string>(supportFiles)
   for (const [toolName, tool] of Object.entries(packageTools(manifest))) {
     const targets = Object.keys(tool.artifacts)
     const target = targets[0]
@@ -572,9 +578,9 @@ function assertPackageTarget(name: string, manifest: SkillPackageManifest, selec
     if (targets.length !== 1 || !allowed) {
       throw new Error(`${name} ${selected} package tool ${toolName} must contain exactly one compatible artifact`)
     }
-    const destination = basename(tool.artifacts[target]!)
+    const destination = `bin/${basename(tool.artifacts[target]!)}`
     if (destinations.has(destination)) {
-      throw new Error(`${name} package tools collide on installed filename ${destination}`)
+      throw new Error(`${name} package tools/support files collide on installed path ${destination}`)
     }
     destinations.add(destination)
   }
