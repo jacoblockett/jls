@@ -16,7 +16,9 @@ function runtimePackage(root = ''): any {
       description: 'test',
       skill_files: ['SKILL.md'],
       runtime: 'rust',
-      runtime_artifacts: { 'windows-x64': 'runtime/windows-x64/map.exe' },
+      runtime_artifacts: process.platform === 'win32'
+        ? { 'windows-x64': 'runtime/windows-x64/map.exe' }
+        : { 'linux-x64-gnu': 'runtime/linux-x64-gnu/map' },
       runtime_cli: 'map',
       runtime_files: ['schema.surql'],
     },
@@ -35,11 +37,15 @@ function multiToolPackage(root = ''): any {
       skill_files: ['SKILL.md'],
       tools: {
         history: {
-          artifacts: { 'windows-x64': 'tools/windows-x64/history.exe' },
+          artifacts: process.platform === 'win32'
+            ? { 'windows-x64': 'tools/windows-x64/history.exe' }
+            : { 'linux-x64-gnu': 'tools/linux-x64-gnu/history' },
           token: 'HISTORY_CLI',
         },
         screenshot: {
-          artifacts: { 'windows-x64': 'tools/windows-x64/screenshot.exe' },
+          artifacts: process.platform === 'win32'
+            ? { 'windows-x64': 'tools/windows-x64/screenshot.exe' }
+            : { 'linux-x64-gnu': 'tools/linux-x64-gnu/screenshot' },
           token: 'SCREENSHOT_CLI',
         },
       },
