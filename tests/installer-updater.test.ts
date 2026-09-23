@@ -82,7 +82,10 @@ function fixtureFetcher(index: unknown, skill: unknown | null = skillRelease(), 
     if (url === 'https://fixture.invalid/example-skill-manifest.json') {
       return skill === null ? new Response('missing', { status: 404 }) : Response.json(skill)
     }
-    if (url === 'https://fixture.invalid/example-skill-windows-x64.zip' && archive) return new Response(archive)
+    if (archive && (
+      url === 'https://fixture.invalid/example-skill-windows-x64.zip'
+      || url === 'https://fixture.invalid/example-skill.zip'
+    )) return new Response(archive)
     return new Response('missing', { status: 404 })
   }) as typeof fetch
 }
