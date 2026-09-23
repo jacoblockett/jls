@@ -422,7 +422,9 @@ function parseTools(value: unknown, label: string): Record<string, SkillTool> | 
       throw new Error(`${label}.${name}.artifacts must contain at least one artifact`)
     }
     for (const target of Object.keys(artifacts)) {
-      if (!isTargetKey(target)) throw new Error(`${label}.${name}.artifacts has invalid target ${target}`)
+      if (target !== 'portable' && !isTargetKey(target)) {
+        throw new Error(`${label}.${name}.artifacts has invalid target ${target}`)
+      }
     }
 
     const token = optionalString(raw.token, `${label}.${name}.token`)
@@ -562,16 +564,19 @@ function assertPackageFiles(root: string, manifest: SkillPackageManifest): void 
 }
 
 function assertPackageTarget(name: string, manifest: SkillPackageManifest, selected: TargetKey | 'portable'): void {
-  const tools = packageTools(manifest)
-  if (selected === 'portable') {
-    if (Object.keys(tools).length > 0) throw new Error(`${name} portable package cannot contain target-specific tools`)
-    return
-  }
-  for (const [toolName, tool] of Object.entries(tools)) {
+  const destinations = new Set<string>()
+  for (const [toolName, tool] of Object.entries(packageTools(manifest))) {
     const targets = Object.keys(tool.artifacts)
-    if (targets.length !== 1 || targets[0] !== selected) {
-      throw new Error(`${name} ${selected} package tool ${toolName} must contain only its ${selected} artifact`)
+    const target = targets[0]
+    const allowed = selected === 'portable' ? target === 'portable' : target === selected || target === 'portable'
+    if (targets.length !== 1 || !allowed) {
+      throw new Error(`${name} ${selected} package tool ${toolName} must contain exactly one compatible artifact`)
     }
+    const destination = basename(tool.artifacts[target]!)
+    if (destinations.has(destination)) {
+      throw new Error(`${name} package tools collide on installed filename ${destination}`)
+    }
+    destinations.add(destination)
   }
 }
 
