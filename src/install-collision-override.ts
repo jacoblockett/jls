@@ -47,11 +47,13 @@ function toolExecutablePath(
   scope: CollisionScope,
   toolName: string,
 ): string {
-  return join(
-    skillToolRoot(scope.root, manifest.name),
-    'bin',
-    `${toolName}${isWindows ? '.exe' : ''}`,
-  )
+  const tool = packageTools(manifest)[toolName]
+  if (!tool) throw new Error(`${manifest.name} manifest is missing tool ${toolName}`)
+  const artifacts = Object.values(tool.artifacts)
+  if (artifacts.length !== 1) {
+    throw new Error(`${manifest.name} installed tool ${toolName} must declare exactly one packaged artifact`)
+  }
+  return join(skillToolRoot(scope.root, manifest.name), 'bin', basename(artifacts[0]!))
 }
 
 function installedPackageManifest(skillPath: string): SkillPackageManifest | undefined {
