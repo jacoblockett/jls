@@ -4,6 +4,10 @@ JLS is a cross-platform installer for a curated set of AI coding-agent skills. I
 
 ## Skills
 
+### [Inspiration](https://github.com/jacoblockett/jls-inspiration)
+
+Inspiration researches visual design and product/UX direction through separate researcher and auditor tracks, durable source history, direct visual evidence, and a synthesized implementation-guidance report.
+
 ### [Map](https://github.com/jacoblockett/jls-map)
 
 Map is a local, durable intent graph for preserving project goals, open questions, decisions, facts, and rationale across long-running agent work. It provides a structured clarification workflow so important context survives beyond a single conversation or context window.
