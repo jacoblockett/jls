@@ -3,6 +3,8 @@ import { homedir, platform } from 'node:os'
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
 import { HARNESS_ADAPTERS, harnessAdapter } from './harnesses'
 import {
+  packageToolFiles,
+  packageTools,
   parseSkillPackageManifest,
   type DownloadedSkillPackage,
   type SkillPackageManifest,
@@ -36,16 +38,19 @@ function userHome(): string {
   return normalizedPath(resolve(process.env.USERPROFILE || process.env.HOME || homedir()))
 }
 
-function runtimeSkillRoot(scopeRoot: string, skill: string): string {
+function skillToolRoot(scopeRoot: string, skill: string): string {
   return join(scopeRoot, '.jls', skill)
 }
 
-function runtimeCliPath(manifest: SkillPackageManifest, scope: CollisionScope): string | undefined {
-  if (!manifest.runtime || !manifest.runtime_cli) return undefined
+function toolExecutablePath(
+  manifest: SkillPackageManifest,
+  scope: CollisionScope,
+  toolName: string,
+): string {
   return join(
-    runtimeSkillRoot(scope.root, manifest.name),
+    skillToolRoot(scope.root, manifest.name),
     'bin',
-    `${manifest.runtime_cli}${isWindows ? '.exe' : ''}`,
+    `${toolName}${isWindows ? '.exe' : ''}`,
   )
 }
 
@@ -117,25 +122,24 @@ function managedSkillFiles(manifest: SkillPackageManifest | undefined, destinati
   ])
 }
 
-function expectedRuntimeFiles(pkg: DownloadedSkillPackage, scope: CollisionScope): string[] {
-  if (!pkg.manifest.runtime) return []
-  const root = runtimeSkillRoot(scope.root, pkg.manifest.name)
-  const cli = runtimeCliPath(pkg.manifest, scope)
+function expectedToolFiles(pkg: DownloadedSkillPackage, scope: CollisionScope): string[] {
+  const root = skillToolRoot(scope.root, pkg.manifest.name)
   return [
-    ...(cli ? [cli] : []),
-    ...(pkg.manifest.runtime_files ?? []).flatMap((rel) => (
+    ...Object.keys(packageTools(pkg.manifest)).map((name) => toolExecutablePath(pkg.manifest, scope, name)),
+    ...packageToolFiles(pkg.manifest).flatMap((rel) => (
       packageFileDestinations(join(pkg.root, rel), join(root, rel))
     )),
   ]
 }
 
-function managedRuntimeFiles(scope: CollisionScope, skill: string): Set<string> {
+function managedToolFiles(scope: CollisionScope, skill: string): Set<string> {
   const files = new Set<string>()
   for (const manifest of installedManifests(scope, skill)) {
-    const cli = runtimeCliPath(manifest, scope)
-    if (cli) files.add(normalizedPath(resolve(cli)))
-    const root = runtimeSkillRoot(scope.root, skill)
-    for (const rel of manifest.runtime_files ?? []) files.add(normalizedPath(resolve(root, rel)))
+    for (const name of Object.keys(packageTools(manifest))) {
+      files.add(normalizedPath(resolve(toolExecutablePath(manifest, scope, name))))
+    }
+    const root = skillToolRoot(scope.root, skill)
+    for (const rel of packageToolFiles(manifest)) files.add(normalizedPath(resolve(root, rel)))
   }
   return files
 }
@@ -194,10 +198,10 @@ export function detectInstallCollisions(
     collisions.set(normalized, { path: normalized })
   }
 
-  const runtimeManaged = managedRuntimeFiles(scope, skill)
-  for (const destination of expectedRuntimeFiles(pkg, scope)) {
+  const toolManaged = managedToolFiles(scope, skill)
+  for (const destination of expectedToolFiles(pkg, scope)) {
     addBlockingContainers(destination, scope.root, add)
-    if (filePathCollides(destination, runtimeManaged)) add(destination)
+    if (filePathCollides(destination, toolManaged)) add(destination)
   }
 
   for (const agent of agents) {
