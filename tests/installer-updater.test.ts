@@ -9,6 +9,8 @@ import {
   downloadSkillPackage,
   fetchStableReleaseManifest,
   isSkillCompatible,
+  packageToolFiles,
+  packageTools,
   parseReleaseManifest,
   parseSkillPackageManifest,
   parseSkillReleaseManifest,
@@ -208,7 +210,7 @@ describe('release metadata', () => {
 })
 
 describe('skill package contract', () => {
-  test('package manifest validation remains installer-owned and skill-agnostic', () => {
+  test('package manifest validation supports multiple installer-managed tools', () => {
     const parsed = parseSkillPackageManifest({
       name: 'example-skill',
       version: '1.2.3',
@@ -220,10 +222,17 @@ describe('skill package contract', () => {
         detect: { command: ['example'], path: ['tools/example'] },
       }],
       skill_files: ['SKILL.md'],
-      runtime: 'native',
-      runtime_artifacts: { 'windows-x64': 'runtime/windows-x64/example.exe' },
-      runtime_files: ['support.dat'],
-      runtime_cli: 'example',
+      tools: {
+        history: {
+          artifacts: { 'windows-x64': 'tools/windows-x64/history.exe' },
+          token: 'HISTORY_CLI',
+        },
+        screenshot: {
+          artifacts: { 'windows-x64': 'tools/windows-x64/screenshot.exe' },
+          token: 'SCREENSHOT_CLI',
+        },
+      },
+      tool_files: ['support.dat'],
       generated_data: [{
         path: '.example',
         marker: 'project.json',
@@ -231,7 +240,10 @@ describe('skill package contract', () => {
     })
     expect(parsed.name).toBe('example-skill')
     expect(parsed.dependencies?.[0].detect).toEqual({ command: ['example'], path: ['tools/example'] })
-    expect(parsed.runtime_artifacts?.['windows-x64']).toBe('runtime/windows-x64/example.exe')
+    expect(Object.keys(packageTools(parsed))).toEqual(['history', 'screenshot'])
+    expect(packageTools(parsed).history?.token).toBe('HISTORY_CLI')
+    expect(packageTools(parsed).screenshot?.artifacts['windows-x64']).toBe('tools/windows-x64/screenshot.exe')
+    expect(packageToolFiles(parsed)).toEqual(['support.dat'])
     expect(parsed.generated_data?.[0]).toEqual({
       path: '.example',
       marker: 'project.json',
@@ -242,6 +254,52 @@ describe('skill package contract', () => {
       min_installer: '0.7.0',
       description: 'Example',
       skill_files: ['../escape'],
+    })).toThrow()
+  })
+
+  test('legacy singular runtime manifests normalize to one managed tool', () => {
+    const parsed = parseSkillPackageManifest({
+      name: 'example-skill',
+      version: '1.2.3',
+      min_installer: '0.7.0',
+      description: 'Example',
+      skill_files: ['SKILL.md'],
+      runtime: 'rust',
+      runtime_artifacts: { 'windows-x64': 'runtime/windows-x64/example.exe' },
+      runtime_files: ['support.dat'],
+      runtime_cli: 'example',
+      cli_token: 'EXAMPLE_CLI',
+    })
+    expect(packageTools(parsed)).toEqual({
+      example: {
+        artifacts: { 'windows-x64': 'runtime/windows-x64/example.exe' },
+        token: 'EXAMPLE_CLI',
+      },
+    })
+    expect(packageToolFiles(parsed)).toEqual(['support.dat'])
+  })
+
+  test('package manifest rejects ambiguous mixed or duplicate tool declarations', () => {
+    const base = {
+      name: 'example-skill',
+      version: '1.2.3',
+      min_installer: '0.7.0',
+      description: 'Example',
+      skill_files: ['SKILL.md'],
+    }
+    expect(() => parseSkillPackageManifest({
+      ...base,
+      tools: {
+        one: { artifacts: { 'windows-x64': 'one.exe' }, token: 'SAME_CLI' },
+        two: { artifacts: { 'windows-x64': 'two.exe' }, token: 'SAME_CLI' },
+      },
+    })).toThrow()
+    expect(() => parseSkillPackageManifest({
+      ...base,
+      tools: { one: { artifacts: { 'windows-x64': 'one.exe' } } },
+      runtime: 'rust',
+      runtime_artifacts: { 'windows-x64': 'legacy.exe' },
+      runtime_cli: 'legacy',
     })).toThrow()
   })
 
@@ -267,6 +325,59 @@ describe('skill package contract', () => {
       skill_files: ['SKILL.md'],
     })
     expect('format' in parsed).toBe(false)
+  })
+
+  test('download validates every tool artifact in a target-specific package', async () => {
+    const root = reset('multi-tool-package')
+    const packageRoot = join(root, 'package')
+    mkdirSync(join(packageRoot, 'tools', 'windows-x64'), { recursive: true })
+    const packageManifest = {
+      name: 'example-skill',
+      version: '1.2.3',
+      min_installer: '0.7.0',
+      description: 'Example',
+      skill_files: ['SKILL.md'],
+      tools: {
+        history: {
+          artifacts: { 'windows-x64': 'tools/windows-x64/history.exe' },
+          token: 'HISTORY_CLI',
+        },
+        screenshot: {
+          artifacts: { 'windows-x64': 'tools/windows-x64/screenshot.exe' },
+          token: 'SCREENSHOT_CLI',
+        },
+      },
+    }
+    writeFileSync(join(packageRoot, 'manifest.json'), `${JSON.stringify(packageManifest, null, 2)}\n`)
+    writeFileSync(join(packageRoot, 'SKILL.md'), '# Example Skill\n')
+    writeFileSync(join(packageRoot, 'tools', 'windows-x64', 'history.exe'), 'history')
+    writeFileSync(join(packageRoot, 'tools', 'windows-x64', 'screenshot.exe'), 'screenshot')
+
+    const zip = new AdmZip()
+    zip.addLocalFolder(packageRoot)
+    const bytes = new Uint8Array(zip.toBuffer())
+    const released: ReleasedSkill = {
+      version: '1.2.3',
+      min_installer: '0.7.0',
+      artifacts: {
+        'windows-x64': {
+          url: 'https://fixture.invalid/example-skill-windows-x64.zip',
+          sha256: sha256(bytes),
+        },
+      },
+    }
+
+    const downloaded = await downloadSkillPackage(
+      'example-skill',
+      released,
+      fixtureFetcher({}, {}, bytes),
+      'windows-x64',
+    )
+    try {
+      expect(Object.keys(packageTools(downloaded.manifest))).toEqual(['history', 'screenshot'])
+    } finally {
+      downloaded.cleanup()
+    }
   })
 
   test('download verifies and extracts a referenced package', async () => {
