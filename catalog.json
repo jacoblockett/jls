@@ -1,5 +1,8 @@
 {
   "skills": {
+    "inspiration": {
+      "manifest_url": "https://github.com/jacoblockett/jls-inspiration/releases/latest/download/manifest.json"
+    },
     "map": {
       "manifest_url": "https://github.com/jacoblockett/jls-map/releases/latest/download/manifest.json"
     },
