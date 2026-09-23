@@ -24,6 +24,31 @@ function runtimePackage(root = ''): any {
   }
 }
 
+function multiToolPackage(root = ''): any {
+  return {
+    manifest: {
+      name: 'inspiration',
+      version: '1.0.0',
+      min_installer: '0.4.1',
+      description: 'test',
+      skill_files: ['SKILL.md'],
+      tools: {
+        history: {
+          artifacts: { 'windows-x64': 'tools/windows-x64/history.exe' },
+          token: 'HISTORY_CLI',
+        },
+        screenshot: {
+          artifacts: { 'windows-x64': 'tools/windows-x64/screenshot.exe' },
+          token: 'SCREENSHOT_CLI',
+        },
+      },
+      tool_files: ['browser-support.dat'],
+    },
+    root,
+    cleanup() {},
+  }
+}
+
 describe('file-granular installation collision behavior', () => {
   test('pre-existing runtime directories are containers, not collisions', () => {
     const root = mkdtempSync(join(tmpdir(), 'jls-files-'))
@@ -67,6 +92,25 @@ describe('file-granular installation collision behavior', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
       rmSync(outside, { recursive: true, force: true })
+    }
+  })
+
+  test('multiple declared tools are independently collision-checked', () => {
+    const root = mkdtempSync(join(tmpdir(), 'jls-files-'))
+    try {
+      const bin = join(root, '.jls', 'inspiration', 'bin')
+      mkdirSync(bin, { recursive: true })
+      const history = process.platform === 'win32' ? join(bin, 'history.exe') : join(bin, 'history')
+      const screenshot = process.platform === 'win32' ? join(bin, 'screenshot.exe') : join(bin, 'screenshot')
+      writeFileSync(history, 'foreign')
+      writeFileSync(screenshot, 'foreign')
+      const scope = { kind: 'project', origin: 'custom', identity: root, root } as const
+      const collisions = detectInstallCollisions(multiToolPackage(), scope, [])
+      expect(collisions.map((collision) => collision.path)).toContain(history)
+      expect(collisions.map((collision) => collision.path)).toContain(screenshot)
+      expect(collisions).toHaveLength(2)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
     }
   })
 
