@@ -25,3 +25,13 @@ test('non-TOML resources retain native Windows paths', () => {
   const windowsPath = 'C:\\Users\\jacob\\project\\.jls\\map\\bin\\map.exe'
   expect(renderResource(`CLI: ${token}\n`, { [token]: windowsPath }, 'AGENTS.md')).toBe(`CLI: ${windowsPath}\n`)
 })
+
+test('resources render multiple managed-tool tokens independently', () => {
+  const template = 'history={{HISTORY_CLI}}\nscreenshot={{SCREENSHOT_CLI}}\n'
+  const rendered = renderResource(template, {
+    '{{HISTORY_CLI}}': '/project/.jls/inspiration/bin/history',
+    '{{SCREENSHOT_CLI}}': '/project/.jls/inspiration/bin/screenshot',
+  }, 'agent.md')
+  expect(rendered).toContain('history=/project/.jls/inspiration/bin/history')
+  expect(rendered).toContain('screenshot=/project/.jls/inspiration/bin/screenshot')
+})
