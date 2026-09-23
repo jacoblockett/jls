@@ -307,8 +307,17 @@ function discoverInstallations(scope: Scope): InstallGroup[] {
     .sort((a, b) => a.key.localeCompare(b.key))
 }
 
+function toolArtifact(manifest: Manifest, toolName: string): string {
+  const tool = packageTools(manifest)[toolName]
+  if (!tool) throw new Error(`${manifest.name} manifest is missing tool ${toolName}`)
+  const target = compiledTarget().key
+  const artifact = tool.artifacts[target] ?? tool.artifacts.portable
+  if (!artifact) throw new Error(`${manifest.name} tool ${toolName} has no bundled artifact for ${target}`)
+  return artifact
+}
+
 function toolExecutablePath(manifest: Manifest, scope: Scope, toolName: string): string {
-  return join(skillToolRoot(scope.root, manifest.name), 'bin', `${toolName}${compiledTarget().executableSuffix}`)
+  return join(skillToolRoot(scope.root, manifest.name), 'bin', basename(toolArtifact(manifest, toolName)))
 }
 
 function installedToolFiles(manifest: Manifest, scope: Scope): string[] {
@@ -409,11 +418,9 @@ function provisionTools(
   removeObsoleteToolFiles(previous, manifest, scope)
   removeLegacyOwnershipMarkers(previous ?? manifest, scope)
 
-  const target = compiledTarget().key
   const root = skillToolRoot(scope.root, manifest.name)
-  for (const [name, tool] of Object.entries(packageTools(manifest))) {
-    const artifact = tool.artifacts[target]
-    if (!artifact) throw new Error(`${manifest.name} tool ${name} has no bundled artifact for ${target}`)
+  for (const name of Object.keys(packageTools(manifest))) {
+    const artifact = toolArtifact(manifest, name)
     const executable = toolExecutablePath(manifest, scope, name)
     copyPackageEntry(join(pkg.root, artifact), executable)
     try { chmodSync(executable, 0o755) } catch {}
