@@ -287,7 +287,7 @@ A successful installer update intentionally ends the current session; the user r
 The note is exactly:
 
 ```text
-This will uninstall the current installer binary file from the location you launched it from and remove installer-owned metadata and tooling. Doing so will immediately end the current session. It will not, however, remove or uninstall any currently installed skills, agent files, agent instruction injections, skill-managed tools, or generated data from skills.
+This will uninstall the current installer binary file from the location you launched it from and remove installer-owned metadata and tooling. Doing so will immediately end the current session. It will not, however, remove or uninstall any currently installed skills, agent files, agent instruction injections, skill runtimes, or generated data from skills.
 ```
 
 The semantic contract is:
