@@ -303,6 +303,49 @@ describe('skill package contract', () => {
     })).toThrow()
   })
 
+  test('target packages reject tools that would install to the same filename', async () => {
+    const root = reset('colliding-tool-package')
+    const packageRoot = join(root, 'package')
+    mkdirSync(join(packageRoot, 'one'), { recursive: true })
+    mkdirSync(join(packageRoot, 'two'), { recursive: true })
+    const packageManifest = {
+      name: 'example-skill',
+      version: '1.2.3',
+      min_installer: '0.7.0',
+      description: 'Example',
+      skill_files: ['SKILL.md'],
+      tools: {
+        first: { artifacts: { 'windows-x64': 'one/tool.exe' }, token: 'FIRST_CLI' },
+        second: { artifacts: { 'windows-x64': 'two/tool.exe' }, token: 'SECOND_CLI' },
+      },
+    }
+    writeFileSync(join(packageRoot, 'manifest.json'), `${JSON.stringify(packageManifest, null, 2)}\n`)
+    writeFileSync(join(packageRoot, 'SKILL.md'), '# Example Skill\n')
+    writeFileSync(join(packageRoot, 'one', 'tool.exe'), 'one')
+    writeFileSync(join(packageRoot, 'two', 'tool.exe'), 'two')
+
+    const zip = new AdmZip()
+    zip.addLocalFolder(packageRoot)
+    const bytes = new Uint8Array(zip.toBuffer())
+    const released: ReleasedSkill = {
+      version: '1.2.3',
+      min_installer: '0.7.0',
+      artifacts: {
+        'windows-x64': {
+          url: 'https://fixture.invalid/example-skill-windows-x64.zip',
+          sha256: sha256(bytes),
+        },
+      },
+    }
+
+    await expect(downloadSkillPackage(
+      'example-skill',
+      released,
+      fixtureFetcher({}, {}, bytes),
+      'windows-x64',
+    )).rejects.toThrow()
+  })
+
   test('legacy ownership_marker fields are ignored rather than becoming runtime ownership state', () => {
     const parsed = parseSkillPackageManifest({
       name: 'example-skill',
