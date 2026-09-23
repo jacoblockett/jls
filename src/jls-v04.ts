@@ -12,6 +12,8 @@ import {
   compareVersions,
   downloadSkillPackage,
   fetchStableReleaseManifest,
+  packageToolFiles,
+  packageTools,
   parseSkillPackageManifest,
   stageInstallerUpdate,
   type DownloadedSkillPackage,
@@ -282,6 +284,19 @@ function skillFilesPresent(skillPath: string, manifest: SkillPackageManifest): b
   })
 }
 
+function toolFilesPresent(manifest: SkillPackageManifest, scope: Scope): boolean {
+  const root = join(scope.root, '.jls', manifest.name)
+  for (const name of Object.keys(packageTools(manifest))) {
+    const executable = join(root, 'bin', `${name}${isWindows ? '.exe' : ''}`)
+    if (!existsSync(executable) || !statSync(executable).isFile()) return false
+  }
+  for (const rel of packageToolFiles(manifest)) {
+    const path = join(root, rel)
+    if (!existsSync(path) || !statSync(path).isFile()) return false
+  }
+  return true
+}
+
 function harnessResourcesPresent(manifest: SkillPackageManifest, agent: string, scope: Scope): boolean {
   const declared = manifest.harness_resources?.[agent] ?? {}
   const roots = agentPaths(agent, scope).resources
@@ -335,7 +350,9 @@ function targetInstalled(scope: Scope, skill: string, agent: string): boolean {
   const skillPath = join(paths.skillRoot, skill)
   const manifest = installedPackageManifest(skillPath)
   if (!manifest || manifest.name !== skill) return false
-  return skillFilesPresent(skillPath, manifest) && harnessResourcesPresent(manifest, agent, scope)
+  return skillFilesPresent(skillPath, manifest)
+    && harnessResourcesPresent(manifest, agent, scope)
+    && toolFilesPresent(manifest, scope)
 }
 
 function displaySkillName(name: string): string {
