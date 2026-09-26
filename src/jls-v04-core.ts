@@ -22,7 +22,6 @@ import { classifyInstallTargets, staleUpdateTargets, type InstallTargetState } f
 import {
   downloadSkillPackage,
   fetchStableReleaseManifest,
-  INSTALLER_COMPATIBILITY_VERSION,
   packageToolFiles,
   packageTools,
   parseSkillPackageManifest,
@@ -581,15 +580,9 @@ function availableVersions(release: ReleaseManifest): Record<string, string> {
   return Object.fromEntries(Object.entries(release.skills).map(([name, skill]) => [name, skill.version]))
 }
 
-function ensureReleasedAndCompatible(release: ReleaseManifest, skills: string[]): void {
+function ensureReleased(release: ReleaseManifest, skills: string[]): void {
   for (const skill of skills) {
-    const released = release.skills[skill]
-    if (released) continue
-    const incompatible = release.incompatibleSkills[skill]
-    if (incompatible) {
-      throw new Error(`${skill} ${incompatible.version} requires JLS ${incompatible.min_installer} or newer; running ${VERSION} with compatibility ${INSTALLER_COMPATIBILITY_VERSION}`)
-    }
-    throw new Error(`stable release does not contain ${skill}`)
+    if (!release.skills[skill]) throw new Error(`stable release does not contain ${skill}`)
   }
 }
 
@@ -599,7 +592,7 @@ async function installCommand(args: string[]): Promise<number> {
   if (parsed.skills.length === 0) throw new Error('no skills selected')
 
   const release = requireRelease(await fetchStableReleaseManifest())
-  ensureReleasedAndCompatible(release, parsed.skills)
+  ensureReleased(release, parsed.skills)
   const agents = parsed.agents.length > 0 ? normalizeAgents(parsed.agents) : detectedAgents()
   if (agents.length === 0) throw new Error('no supported AI harness detected; specify --agent')
 
@@ -669,13 +662,13 @@ async function updateCommand(args: string[]): Promise<number> {
   for (const group of groups) {
     const released = release.skills[group.skill]
     if (!released) {
-      if (parsed.skills.includes(group.skill)) ensureReleasedAndCompatible(release, [group.skill])
+      if (parsed.skills.includes(group.skill)) ensureReleased(release, [group.skill])
       continue
     }
     const staleTargets = staleUpdateTargets(group.targets, released.version)
     if (staleTargets.length === 0) continue
 
-    ensureReleasedAndCompatible(release, [group.skill])
+    ensureReleased(release, [group.skill])
     const pkg = await downloadSkillPackage(group.skill, released)
     try {
       installTargets(
@@ -711,10 +704,7 @@ export async function main(): Promise<number> {
   const args = process.argv.slice(2)
   if (args.length === 0) throw new Error('no lifecycle command supplied')
   if (args.length === 1 && (args[0] === '--version' || args[0] === '-v')) {
-    const compatibility = INSTALLER_COMPATIBILITY_VERSION === VERSION
-      ? ''
-      : ` (compatibility ${INSTALLER_COMPATIBILITY_VERSION})`
-    console.log(`jls ${VERSION}${compatibility}`)
+    console.log(`jls ${VERSION}`)
     return 0
   }
   if (args.some((arg) => arg === '--help' || arg === '-h') || args[0] === 'help') {
