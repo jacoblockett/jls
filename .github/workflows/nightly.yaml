@@ -5,6 +5,10 @@ on:
     - cron: '0 23 * * *'
       timezone: 'America/New_York'
 
+concurrency:
+  group: ${{ github.repository }}-automation
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
