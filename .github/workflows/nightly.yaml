@@ -1,0 +1,76 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: '0 23 * * *'
+      timezone: 'America/New_York'
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for build changes
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          should_build=true
+          git fetch origin --tags --force
+          if git rev-parse -q --verify refs/tags/nightly >/dev/null; then
+            mapfile -t files < <(git diff --name-only nightly..HEAD -- .github/workflows/build.yaml .github/workflows/test.yaml .github/workflows/nightly.yaml .github/workflows/release.yaml .github/workflows/test-trigger.yaml manifest.json src scripts tests package.json bun.lock catalog.json)
+            if (( ${#files[@]} == 0 )); then should_build=false; fi
+          fi
+          echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
+    uses: ./.github/workflows/build.yaml
+    with:
+      target: all
+      release_tag: nightly
+
+  publish:
+    needs: [check, build]
+    if: needs.check.outputs.should_build == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-bundle
+          path: build/release
+      - name: Publish nightly
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mapfile -t assets < <(find build/release -maxdepth 1 -type f -print | sort)
+          (( ${#assets[@]} > 0 )) || { echo 'Verified release bundle is empty.' >&2; exit 1; }
+
+          if gh release view nightly --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload nightly "${assets[@]}" --repo "$GH_REPO" --clobber
+            mapfile -t existing < <(gh release view nightly --repo "$GH_REPO" --json assets --jq '.assets[].name')
+            for name in "${existing[@]}"; do
+              [[ -f "build/release/$name" ]] || gh release delete-asset nightly "$name" --repo "$GH_REPO" -y
+            done
+          else
+            gh release create nightly "${assets[@]}" --repo "$GH_REPO" --title Nightly --notes 'Rolling production-test build from main.' --prerelease --target "$GITHUB_SHA"
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -f nightly "$GITHUB_SHA"
+          git push origin refs/tags/nightly --force
