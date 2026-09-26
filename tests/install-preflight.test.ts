@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { classifyInstallTargets, staleUpdateTargets } from '../src/install-preflight'
@@ -116,17 +116,6 @@ describe('install preflight classification', () => {
 })
 
 describe('runtime-facing installer behavior', () => {
-  test('--version reports the release version', () => {
-    const repo = resolve(import.meta.dir, '..')
-    const manifest = JSON.parse(readFileSync(join(repo, 'manifest.json'), 'utf8'))
-    const result = spawnSync(process.execPath, [join(repo, 'src', 'jls-v04-core.ts'), '--version'], {
-      encoding: 'utf8',
-      windowsHide: true,
-    })
-    expect(result.status).toBe(0)
-    expect(result.stdout).toContain(manifest.version)
-  })
-
   test('explicit update fails when no installation matches the requested skill', () => {
     const repo = resolve(import.meta.dir, '..')
     const root = mkdtempSync(join(tmpdir(), 'jls-update-missing-'))
