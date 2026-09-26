@@ -13,12 +13,10 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { containedPath, extractZip } from './archive'
 import { compiledTarget, isTargetKey, type TargetKey } from './targets'
-import installerManifest from '../manifest.json'
 
 if (Bun.isStandaloneExecutable) compiledTarget()
 
 export const DEFAULT_RELEASE_MANIFEST_URL = 'https://github.com/jacoblockett/jls/releases/latest/download/manifest.json'
-export const INSTALLER_COMPATIBILITY_VERSION = installerManifest.compatibility_version ?? installerManifest.version
 
 type FetchLike = typeof fetch
 
@@ -43,7 +41,6 @@ export type SkillDependency = {
 
 export type ReleasedSkill = {
   version: string
-  min_installer: string
   description?: string
   dependencies?: SkillDependency[]
   artifacts: SkillArtifactMap
@@ -56,7 +53,6 @@ export type SkillReference = {
 export type ReleaseIndex = {
   installer: {
     version: string
-    compatibility_version: string
     artifacts: TargetArtifactMap
   }
   skills: Record<string, SkillReference>
@@ -69,7 +65,6 @@ export type ReleaseManifest = {
     artifacts: TargetArtifactMap
   }
   skills: Record<string, ReleasedSkill>
-  incompatibleSkills: Record<string, ReleasedSkill>
 }
 
 export type InstallerUpdate = {
@@ -135,10 +130,6 @@ export function compareVersions(a: string, b: string): number {
     if (left[i] !== right[i]) return left[i] < right[i] ? -1 : 1
   }
   return 0
-}
-
-export function isSkillCompatible(compatibilityVersion: string, released: Pick<ReleasedSkill, 'min_installer'>): boolean {
-  return compareVersions(compatibilityVersion, released.min_installer) >= 0
 }
 
 function nonEmptyString(value: unknown, label: string): string {
@@ -231,12 +222,6 @@ export function parseReleaseManifest(value: unknown): ReleaseIndex {
   if (typeof installerRaw.version !== 'string' || !semverParts(installerRaw.version)) {
     throw new Error('invalid installer release version')
   }
-  const compatibilityVersion = installerRaw.compatibility_version === undefined
-    ? installerRaw.version
-    : installerRaw.compatibility_version
-  if (typeof compatibilityVersion !== 'string' || !semverParts(compatibilityVersion)) {
-    throw new Error('invalid installer compatibility version')
-  }
   const installerArtifacts = parseArtifactMap(installerRaw.artifacts, 'installer release artifacts', false)
 
   if (!raw.skills || typeof raw.skills !== 'object' || Array.isArray(raw.skills)) {
@@ -251,7 +236,6 @@ export function parseReleaseManifest(value: unknown): ReleaseIndex {
   return {
     installer: {
       version: installerRaw.version,
-      compatibility_version: compatibilityVersion,
       artifacts: installerArtifacts,
     },
     skills,
@@ -263,16 +247,12 @@ export function parseSkillReleaseManifest(name: string, value: unknown): Release
   const raw = value as Record<string, unknown>
   if (raw.name !== name) throw new Error(`released skill manifest for ${name} identifies ${String(raw.name)}`)
   if (typeof raw.version !== 'string' || !semverParts(raw.version)) throw new Error(`invalid released skill version ${name}`)
-  if (typeof raw.min_installer !== 'string' || !semverParts(raw.min_installer)) {
-    throw new Error(`invalid minimum installer version for ${name}`)
-  }
   const description = raw.description === undefined
     ? undefined
     : nonEmptyString(raw.description, `released skill ${name}.description`)
   const dependencies = parseDependencies(raw.dependencies, `released skill ${name}.dependencies`)
   return {
     version: raw.version,
-    min_installer: raw.min_installer,
     ...(description ? { description } : {}),
     ...(dependencies ? { dependencies } : {}),
     artifacts: parseArtifactMap(raw.artifacts, `released skill ${name} artifacts`, true),
@@ -292,23 +272,20 @@ async function fetchReleaseIndex(
 export async function fetchStableReleaseManifest(
   manifestUrl = process.env.JLS_UPDATE_MANIFEST_URL || DEFAULT_RELEASE_MANIFEST_URL,
   fetcher: FetchLike = fetch,
-  compatibilityVersion = INSTALLER_COMPATIBILITY_VERSION,
 ): Promise<ReleaseManifest | null> {
   const index = await fetchReleaseIndex(manifestUrl, fetcher)
   if (!index) return null
 
   const skills: Record<string, ReleasedSkill> = {}
-  const incompatibleSkills: Record<string, ReleasedSkill> = {}
   await Promise.all(Object.entries(index.skills).map(async ([name, reference]) => {
     const response = await fetcher(reference.manifest_url, { headers: { 'user-agent': 'jls' } })
     if (response.status === 404) return
     if (!response.ok) throw new Error(`${name} release check failed with HTTP ${response.status}`)
     const released = parseSkillReleaseManifest(name, await response.json())
-    if (isSkillCompatible(compatibilityVersion, released)) skills[name] = released
-    else incompatibleSkills[name] = released
+    skills[name] = released
   }))
 
-  return { installer: index.installer, skills, incompatibleSkills }
+  return { installer: index.installer, skills }
 }
 
 function targetKey(target?: TargetKey): TargetKey {
@@ -480,9 +457,6 @@ export function parseSkillPackageManifest(value: unknown): SkillPackageManifest 
   const raw = value as Record<string, unknown>
   if (typeof raw.name !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(raw.name)) throw new Error('invalid skill package name')
   if (typeof raw.version !== 'string' || !semverParts(raw.version)) throw new Error(`invalid ${raw.name} package version`)
-  if (typeof raw.min_installer !== 'string' || !semverParts(raw.min_installer)) {
-    throw new Error(`invalid ${raw.name} minimum installer version`)
-  }
   if (typeof raw.description !== 'string' || !raw.description.trim()) throw new Error(`${raw.name} package is missing description`)
 
   const generatedData: GeneratedDataSpec[] | undefined = raw.generated_data === undefined
@@ -524,7 +498,6 @@ export function parseSkillPackageManifest(value: unknown): SkillPackageManifest 
   return {
     name: raw.name,
     version: raw.version,
-    min_installer: raw.min_installer,
     description: raw.description,
     dependencies: parseDependencies(raw.dependencies, `${raw.name} dependencies`),
     skill_files: pathArray(raw.skill_files, `${raw.name} skill_files`, true)!,
@@ -609,9 +582,6 @@ export async function downloadSkillPackage(
     if (manifest.name !== name) throw new Error(`${name} package manifest identifies ${manifest.name}`)
     if (manifest.version !== released.version) {
       throw new Error(`${name} package version ${manifest.version} does not match release index ${released.version}`)
-    }
-    if (manifest.min_installer !== released.min_installer) {
-      throw new Error(`${name} package min_installer does not match release index`)
     }
     if (released.description !== undefined && manifest.description !== released.description) {
       throw new Error(`${name} package description does not match release index`)
