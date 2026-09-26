@@ -1,4 +1,4 @@
-name: Build (Do Not Use)
+name: 'Build (Do Not Use)'
 
 on:
   workflow_call:
