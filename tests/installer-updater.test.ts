@@ -8,7 +8,6 @@ import {
   compareVersions,
   downloadSkillPackage,
   fetchStableReleaseManifest,
-  isSkillCompatible,
   packageToolFiles,
   packageTools,
   parseReleaseManifest,
@@ -52,11 +51,10 @@ function releaseIndex(installerVersion = '0.7.0') {
   }
 }
 
-function skillRelease(version = '1.2.3', sha = '1'.repeat(64), minInstaller = '0.7.0') {
+function skillRelease(version = '1.2.3', sha = '1'.repeat(64)) {
   return {
     name: 'example-skill',
     version,
-    min_installer: minInstaller,
     description: 'Example skill',
     dependencies: [{
       name: 'Example CLI',
@@ -109,10 +107,9 @@ describe('release metadata', () => {
     expect(parseSkillReleaseManifest('example-skill', { ...skillRelease(), format: 1 }).version).toBe('1.2.3')
   })
 
-  test('external skill manifest profile metadata round-trips with compatibility and artifacts', () => {
+  test('external skill manifest profile metadata round-trips with artifacts', () => {
     const released = parseSkillReleaseManifest('example-skill', skillRelease())
     expect(released.version).toBe('1.2.3')
-    expect(released.min_installer).toBe('0.7.0')
     expect(released.description).toBe('Example skill')
     expect(released.dependencies?.[0]).toEqual({
       name: 'Example CLI',
@@ -145,30 +142,10 @@ describe('release metadata', () => {
     })).toThrow()
   })
 
-  test('stable release discovery omits skills above installer compatibility', async () => {
-    const compatible = await fetchStableReleaseManifest(
-      'https://fixture.invalid/manifest.json',
-      fixtureFetcher(releaseIndex(), skillRelease('1.2.3', '1'.repeat(64), '0.4.0')),
-      '0.4.0',
-    )
-    expect(compatible?.skills['example-skill']?.version).toBe('1.2.3')
-    expect(compatible?.incompatibleSkills).toEqual({})
-
-    const incompatible = await fetchStableReleaseManifest(
-      'https://fixture.invalid/manifest.json',
-      fixtureFetcher(releaseIndex(), skillRelease('1.2.3', '1'.repeat(64), '0.4.1')),
-      '0.4.0',
-    )
-    expect(incompatible?.skills['example-skill']).toBeUndefined()
-    expect(incompatible?.incompatibleSkills['example-skill']?.min_installer).toBe('0.4.1')
-    expect(isSkillCompatible('0.4.0', { min_installer: '0.4.1' })).toBe(false)
-  })
-
   test('stable release fetch resolves referenced skill manifests', async () => {
     const resolved = await fetchStableReleaseManifest(
       'https://fixture.invalid/manifest.json',
-      fixtureFetcher(releaseIndex()),
-      '0.7.0',
+      fixtureFetcher(releaseIndex())
     )
     expect(resolved?.skills['example-skill'].version).toBe('1.2.3')
     expect(resolved?.skills['example-skill'].description).toBe('Example skill')
@@ -177,11 +154,9 @@ describe('release metadata', () => {
   test('unpublished referenced skills are omitted without breaking installer update discovery', async () => {
     const resolved = await fetchStableReleaseManifest(
       'https://fixture.invalid/manifest.json',
-      fixtureFetcher(releaseIndex(), null),
-      '0.7.0',
+      fixtureFetcher(releaseIndex(), null)
     )
     expect(resolved?.skills).toEqual({})
-    expect(resolved?.incompatibleSkills).toEqual({})
   })
 
   test('artifact selection remains exact-target with explicit portable fallback only', () => {
@@ -217,7 +192,6 @@ describe('skill package contract', () => {
     const parsed = parseSkillPackageManifest({
       name: 'example-skill',
       version: '1.2.3',
-      min_installer: '0.7.0',
       description: 'Example',
       dependencies: [{
         name: 'Example CLI',
@@ -254,7 +228,6 @@ describe('skill package contract', () => {
     expect(() => parseSkillPackageManifest({
       name: 'example-skill',
       version: '1.2.3',
-      min_installer: '0.7.0',
       description: 'Example',
       skill_files: ['../escape'],
     })).toThrow()
@@ -264,7 +237,6 @@ describe('skill package contract', () => {
     const parsed = parseSkillPackageManifest({
       name: 'example-skill',
       version: '1.2.3',
-      min_installer: '0.7.0',
       description: 'Example',
       skill_files: ['SKILL.md'],
       runtime: 'rust',
@@ -286,7 +258,6 @@ describe('skill package contract', () => {
     const base = {
       name: 'example-skill',
       version: '1.2.3',
-      min_installer: '0.7.0',
       description: 'Example',
       skill_files: ['SKILL.md'],
     }
@@ -314,7 +285,6 @@ describe('skill package contract', () => {
     const packageManifest = {
       name: 'example-skill',
       version: '1.2.3',
-      min_installer: '0.7.0',
       description: 'Example',
       skill_files: ['SKILL.md'],
       tools: {
@@ -332,7 +302,6 @@ describe('skill package contract', () => {
     const bytes = new Uint8Array(zip.toBuffer())
     const released: ReleasedSkill = {
       version: '1.2.3',
-      min_installer: '0.7.0',
       artifacts: {
         'windows-x64': {
           url: 'https://fixture.invalid/example-skill-windows-x64.zip',
@@ -357,7 +326,6 @@ describe('skill package contract', () => {
     const packageManifest = {
       name: 'example-skill',
       version: '1.2.3',
-      min_installer: '0.7.0',
       description: 'Example',
       skill_files: ['SKILL.md'],
       tools: {
@@ -375,7 +343,6 @@ describe('skill package contract', () => {
     const bytes = new Uint8Array(zip.toBuffer())
     const released: ReleasedSkill = {
       version: '1.2.3',
-      min_installer: '0.7.0',
       artifacts: {
         portable: {
           url: 'https://fixture.invalid/example-skill.zip',
@@ -396,7 +363,6 @@ describe('skill package contract', () => {
     const parsed = parseSkillPackageManifest({
       name: 'example-skill',
       version: '1.2.3',
-      min_installer: '0.7.0',
       description: 'Example',
       skill_files: ['SKILL.md'],
       generated_data: [{ path: '.example', marker: 'project.json', ownership_marker: '.jls-owned.json' }],
@@ -409,7 +375,6 @@ describe('skill package contract', () => {
       format: 1,
       name: 'example-skill',
       version: '1.2.3',
-      min_installer: '0.7.0',
       description: 'Example',
       skill_files: ['SKILL.md'],
     })
@@ -423,7 +388,6 @@ describe('skill package contract', () => {
     const packageManifest = {
       name: 'example-skill',
       version: '1.2.3',
-      min_installer: '0.7.0',
       description: 'Example',
       skill_files: ['SKILL.md'],
       tools: {
@@ -447,7 +411,6 @@ describe('skill package contract', () => {
     const bytes = new Uint8Array(zip.toBuffer())
     const released: ReleasedSkill = {
       version: '1.2.3',
-      min_installer: '0.7.0',
       artifacts: {
         'windows-x64': {
           url: 'https://fixture.invalid/example-skill-windows-x64.zip',
@@ -476,7 +439,6 @@ describe('skill package contract', () => {
     const packageManifest = {
       name: 'example-skill',
       version: '1.2.3',
-      min_installer: '0.7.0',
       description: 'Example',
       skill_files: ['SKILL.md'],
       tools: {
@@ -495,7 +457,6 @@ describe('skill package contract', () => {
     const bytes = new Uint8Array(zip.toBuffer())
     const released: ReleasedSkill = {
       version: '1.2.3',
-      min_installer: '0.7.0',
       artifacts: {
         portable: {
           url: 'https://fixture.invalid/example-skill.zip',
@@ -524,7 +485,6 @@ describe('skill package contract', () => {
     const packageManifest = {
       name: 'example-skill',
       version: '1.2.3',
-      min_installer: '0.7.0',
       description: 'Example',
       skill_files: ['SKILL.md'],
     }
@@ -537,7 +497,6 @@ describe('skill package contract', () => {
     const bytes = new Uint8Array(zip.toBuffer())
     const released: ReleasedSkill = {
       version: '1.2.3',
-      min_installer: '0.7.0',
       description: 'Example',
       artifacts: {
         'windows-x64': {
