@@ -11,7 +11,6 @@ function baseManifest() {
   return {
     name: 'example-skill',
     version: '1.2.3',
-    min_installer: '0.3.2',
     description: 'Example',
     skill_files: ['SKILL.md'],
   }
@@ -62,7 +61,6 @@ describe('file-explicit package ownership contract', () => {
     const sha256 = createHash('sha256').update(bytes).digest('hex')
     const released: ReleasedSkill = {
       version: '1.2.3',
-      min_installer: '0.3.2',
       artifacts: {
         'windows-x64': { url: 'https://fixture.invalid/example.zip', sha256 },
       },
@@ -87,7 +85,6 @@ describe('file-explicit package ownership contract', () => {
     const sha256 = createHash('sha256').update(bytes).digest('hex')
     const released: ReleasedSkill = {
       version: '1.2.3',
-      min_installer: '0.3.2',
       artifacts: {
         'windows-x64': { url: 'https://fixture.invalid/example.zip', sha256 },
       },
