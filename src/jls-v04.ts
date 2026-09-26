@@ -613,15 +613,11 @@ async function installAtScope(
     })
     const selectableSkills = skillItems.filter((item) => !item.disabled)
     if (skillItems.length === 0) {
-      prompts.log.warn(
-        Object.keys(release.incompatibleSkills).length > 0
-          ? 'No skills compatible with this JLS installer are currently available.'
-          : 'No skills are currently available to install.',
-      )
+      prompts.log.warn('No skills are currently available to install.')
       return BACK_SIGNAL
     }
     if (selectableSkills.length === 0) {
-      prompts.log.warn('All compatible skills are already installed.')
+      prompts.log.warn('All available skills are already installed.')
       return BACK_SIGNAL
     }
 
@@ -785,7 +781,7 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
   const installed = discoverInstallations(scope)
   const available = installed.filter((group) => updateAvailable(group, availableVersions))
   if (available.length === 0) {
-    prompts.log.info('No compatible updates were found.')
+    prompts.log.info('No updates were found.')
     return BACK_SIGNAL
   }
 
