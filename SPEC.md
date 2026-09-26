@@ -29,11 +29,9 @@ linux-arm64-musl
 
 ## Version authority
 
-The repository root `manifest.json` is the installer product and release version authority. `package.json` is not a release manifest.
+The current stable GitHub release is the only persisted release-version authority. Repository source manifests do not carry release versions, and `package.json` is not a release manifest.
 
-Implementation and test work for 0.4 must keep the installer manifest at `0.3.2` until explicit release approval. The intended later stable version is `0.4.0`; it must not be applied merely to test the implementation.
-
-A stable release is dispatched only when the manifest `.version` increases to a valid higher semantic version. An unchanged version performs no stable dispatch. A decrease or invalid version fails closed.
+Stable releases are manually dispatched with an explicit plain-semver version. The workflow compares that request against the current stable release and fails unless the requested version is strictly greater. The build injects the selected version into generated release manifests and packaged skill manifests; source manifests remain versionless.
 
 ## Interactive entry point
 
@@ -340,7 +338,7 @@ The JLS stable release manifest references externally owned skill release manife
 
 Public installer filenames remain target-qualified. Tasks publishes its portable package as `tasks.zip`.
 
-Stable releases are version-gated by each repository's manifest version. Ordinary source edits may run lightweight version checks but must not create a new stable release when the version is unchanged.
+Stable releases are initiated only by an explicit manual workflow dispatch. Source edits and source-manifest changes do not trigger stable releases. The requested stable version must be strictly greater than the repository's current stable release.
 
 ## Test-build trigger
 
@@ -363,12 +361,10 @@ The intended assistant workflow is:
 3. report that the test build was triggered;
 4. do not wait for or poll the build result unless the user reports a failure or explicitly asks for inspection.
 
-No manifest version bump is required for a test build.
+Test builds require no source-version change because source manifests do not track release versions.
 
-## 0.4 release boundary
+## Stable release boundary
 
-The implementation target is JLS 0.4.0, but implementation/testing must not change the installer manifest from `0.3.2` until explicit release approval.
+Do not invent or persist future release numbers in repository source. A stable version exists only when selected for a manual stable workflow dispatch and successfully published.
 
-Map remains `0.4.0` and Tasks remains `0.2.0` until the user explicitly decides their next release versions. Do not invent replacement version numbers merely to publish source changes.
-
-Before the JLS 0.4 stable release, the skill release manifests referenced by JLS must correspond to skill packages that actually contain the source-level contracts intended for that release. A source commit existing after an older same-version stable package does not make that older package magically contain the newer behavior.
+Skill release manifests referenced by JLS must correspond to skill packages that actually contain the source-level contracts intended for that release. A source commit existing after an older stable package does not make that older package contain newer behavior.
