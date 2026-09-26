@@ -20,7 +20,7 @@ if (!hostMatchesTarget(buildTarget)) {
 
 type SkillReference = { manifest_url: string }
 type Catalog = { skills: Record<string, SkillReference> }
-type InstallerManifest = { name: 'jls'; version: string; compatibility_version: string }
+type InstallerManifest = { name: 'jls'; version: string }
 
 function sha256(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
@@ -51,10 +51,7 @@ function readInstallerManifest(): InstallerManifest {
   if (typeof raw.version !== 'string' || !semver.test(raw.version)) {
     throw new Error(`manifest.json version must be plain semver: ${String(raw.version)}`)
   }
-  if (typeof raw.compatibility_version !== 'string' || !semver.test(raw.compatibility_version)) {
-    throw new Error(`manifest.json compatibility_version must be plain semver: ${String(raw.compatibility_version)}`)
-  }
-  return { name: 'jls', version: raw.version, compatibility_version: raw.compatibility_version }
+  return { name: 'jls', version: raw.version }
 }
 
 const installerManifest = readInstallerManifest()
@@ -88,7 +85,6 @@ const catalog = readCatalog()
 const releaseManifest = {
   installer: {
     version: installerManifest.version,
-    compatibility_version: installerManifest.compatibility_version,
     artifacts: {
       [buildTarget.key]: {
         url: `${releaseBase}/${installerName}`,
