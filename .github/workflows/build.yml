@@ -62,7 +62,8 @@ jobs:
           fi
 
           stable_version=0.0.0
-          if latest_tag="$(gh api "repos/${{ github.repository }}/releases/latest" --jq '.tag_name' 2>/dev/null)"; then
+          latest_tag="$(gh api "repos/${{ github.repository }}/releases?per_page=100" --jq '[.[] | select(.draft == false and .prerelease == false)][0].tag_name // empty')"
+          if [[ -n "$latest_tag" ]]; then
             if [[ ! "$latest_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "Latest stable release tag must be vMAJOR.MINOR.PATCH: $latest_tag" >&2
               exit 1
