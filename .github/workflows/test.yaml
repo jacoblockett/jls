@@ -19,6 +19,10 @@ on:
           - linux-x64-musl
           - linux-arm64-musl
 
+concurrency:
+  group: ${{ github.repository }}-automation
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
