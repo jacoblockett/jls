@@ -20,7 +20,7 @@ if (!hostMatchesTarget(buildTarget)) {
 
 type SkillReference = { manifest_url: string }
 type Catalog = { skills: Record<string, SkillReference> }
-type InstallerManifest = { name: 'jls'; version: string }
+type InstallerManifest = { name: 'jls' }
 
 function sha256(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
@@ -48,13 +48,14 @@ function readCatalog(): Catalog {
 function readInstallerManifest(): InstallerManifest {
   const raw = JSON.parse(readFileSync(join(repo, 'manifest.json'), 'utf8')) as Record<string, unknown>
   if (raw.name !== 'jls') throw new Error('installer manifest name must be jls')
-  if (typeof raw.version !== 'string' || !semver.test(raw.version)) {
-    throw new Error(`manifest.json version must be plain semver: ${String(raw.version)}`)
-  }
-  return { name: 'jls', version: raw.version }
+  return { name: 'jls' }
 }
 
-const installerManifest = readInstallerManifest()
+readInstallerManifest()
+const buildVersion = process.env.JLS_BUILD_VERSION?.trim()
+if (!buildVersion || !semver.test(buildVersion)) {
+  throw new Error(`JLS_BUILD_VERSION must be plain semver: ${String(buildVersion)}`)
+}
 const installerName = installerAssetName(buildTarget)
 const output = join(out, installerName)
 rmSync(output, { force: true })
@@ -67,6 +68,8 @@ const installerBuild = Bun.spawnSync([
   `--target=${buildTarget.bunCompileTarget}`,
   '--define',
   `JLS_COMPILED_TARGET=${JSON.stringify(buildTarget.key)}`,
+  '--define',
+  `JLS_VERSION=${JSON.stringify(buildVersion)}`,
   '--outfile',
   output,
 ], {
@@ -84,7 +87,7 @@ const catalog = readCatalog()
 
 const releaseManifest = {
   installer: {
-    version: installerManifest.version,
+    version: buildVersion,
     artifacts: {
       [buildTarget.key]: {
         url: `${releaseBase}/${installerName}`,
