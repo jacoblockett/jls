@@ -69,7 +69,7 @@ const installerBuild = Bun.spawnSync([
   '--define',
   `JLS_COMPILED_TARGET=${JSON.stringify(buildTarget.key)}`,
   '--define',
-  `JLS_VERSION=${JSON.stringify(buildVersion)}`,
+  `process.env.JLS_BUILD_VERSION=${JSON.stringify(buildVersion)}`,
   '--outfile',
   output,
 ], {
