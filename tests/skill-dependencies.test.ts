@@ -47,13 +47,11 @@ describe('skill dependency detection', () => {
     const released: Record<string, ReleasedSkill> = {
       tasks: {
         version: '1.0.0',
-        min_installer: '0.4.0',
         dependencies: [beads],
         artifacts: {},
       },
       map: {
         version: '1.0.0',
-        min_installer: '0.4.0',
         artifacts: {},
       },
     }
