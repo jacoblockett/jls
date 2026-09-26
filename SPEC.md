@@ -31,7 +31,7 @@ linux-arm64-musl
 
 The current stable GitHub release is the only persisted release-version authority. Repository source manifests do not carry release versions, and `package.json` is not a release manifest.
 
-Stable releases are manually dispatched with an explicit plain-semver version. The workflow compares that request against the current stable release and fails unless the requested version is strictly greater. The build injects the selected version into generated release manifests and packaged skill manifests; source manifests remain versionless.
+Stable releases are manually dispatched through the Release workflow by choosing `major`, `minor`, `patch`, or `replace current`; `patch` is the default. Major/minor/patch increment the current stable version, using `0.0.0` as the baseline when no stable release exists. Replace current rebuilds the current stable version and replaces its release and tag after a successful build. The build injects the resolved version into generated release manifests and packaged skill manifests; source manifests remain versionless.
 
 ## Interactive entry point
 
@@ -338,7 +338,14 @@ The JLS stable release manifest references externally owned skill release manife
 
 Public installer filenames remain target-qualified. Tasks publishes its portable package as `tasks.zip`.
 
-Stable releases are initiated only by an explicit manual workflow dispatch. Source edits and source-manifest changes do not trigger stable releases. The requested stable version must be strictly greater than the repository's current stable release.
+Stable releases are initiated only by the manual Release workflow. Source edits and source-manifest changes do not trigger stable releases. Major/minor/patch derive the next version from the current stable release; replace-current is the only path that intentionally republishes an existing stable version.
+
+The workflow layout is:
+- `build.yaml`: reusable build/package implementation only, exposed in Actions as `Build (Do Not Use)`;
+- `test.yaml`: manual non-release test build, with target selection where target-specific executables exist;
+- `nightly.yaml`: scheduled nightly build/publish with no manual inputs;
+- `release.yaml`: manual stable release version action;
+- `test-trigger.yaml`: branch-create bridge for `jls-test/**` ephemeral test branches.
 
 ## Test-build trigger
 
@@ -350,9 +357,7 @@ A lightweight workflow listens for creation of an ephemeral branch matching:
 jls-test/**
 ```
 
-For JLS, it dispatches the existing non-release installer build from `main` and then deletes the trigger branch.
-
-For Map, the test trigger dispatches the single `linux-x64-gnu` non-release target. Stable and nightly Map releases still build the complete supported target matrix.
+The test trigger dispatches the repository's Test workflow from `main` and then deletes the trigger branch. For target-specific repositories, assistant-triggered tests request the complete supported target matrix.
 
 The intended assistant workflow is:
 
@@ -365,6 +370,6 @@ Test builds require no source-version change because source manifests do not tra
 
 ## Stable release boundary
 
-Do not invent or persist future release numbers in repository source. A stable version exists only when selected for a manual stable workflow dispatch and successfully published.
+Do not invent or persist future release numbers in repository source. A stable version exists only when resolved by the Release workflow and successfully published.
 
 Skill release manifests referenced by JLS must correspond to skill packages that actually contain the source-level contracts intended for that release. A source commit existing after an older stable package does not make that older package contain newer behavior.
