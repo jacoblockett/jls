@@ -342,7 +342,7 @@ Stable releases are initiated only by the manual Release workflow. Source edits 
 
 The workflow layout is:
 - `build.yaml`: reusable build/package implementation only, exposed in Actions as `Build (Do Not Use)`;
-- `test.yaml`: manual non-release test build, with target selection defaulting to `all` where target-specific executables exist;
+- `test.yaml`: manual non-stable test build, with target selection defaulting to `all` where target-specific executables exist; successful runs replace the rolling `Test` prerelease/tag and expose the built files as direct release assets;
 - `nightly.yaml`: scheduled nightly build/publish with no manual inputs;
 - `release.yaml`: manual stable release version action;
 - `test-trigger.yaml`: branch-create bridge for `jls-test/**` ephemeral test branches.
