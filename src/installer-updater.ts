@@ -61,7 +61,6 @@ export type ReleaseIndex = {
 export type ReleaseManifest = {
   installer: {
     version: string
-    compatibility_version: string
     artifacts: TargetArtifactMap
   }
   skills: Record<string, ReleasedSkill>
@@ -87,7 +86,6 @@ export type SkillTool = {
 export type SkillPackageManifest = {
   name: string
   version: string
-  min_installer: string
   description: string
   dependencies?: SkillDependency[]
   skill_files: string[]
