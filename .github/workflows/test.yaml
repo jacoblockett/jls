@@ -24,11 +24,70 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
     uses: ./.github/workflows/build.yaml
     with:
       target: ${{ inputs.target }}
-      release_tag: dev
+      release_tag: test
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download built targets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: target-*
+          path: build/targets
+          merge-multiple: false
+
+      - name: Stage direct-download test assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf test-assets
+          mkdir -p test-assets
+
+          find build/targets -mindepth 2 -maxdepth 2 -type f ! -name manifest.json -print0 |
+            while IFS= read -r -d '' file; do
+              cp "$file" "test-assets/$(basename "$file")"
+            done
+
+          test "$(find test-assets -maxdepth 1 -type f | wc -l)" -gt 0
+
+      - name: Publish rolling Test prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mapfile -t assets < <(find test-assets -maxdepth 1 -type f -print | sort)
+          (( ${#assets[@]} > 0 )) || { echo 'No test assets were staged.' >&2; exit 1; }
+
+          if gh release view test --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload test "${assets[@]}" --repo "$GH_REPO" --clobber
+            mapfile -t existing < <(gh release view test --repo "$GH_REPO" --json assets --jq '.assets[].name')
+            for name in "${existing[@]}"; do
+              [[ -f "test-assets/$name" ]] || gh release delete-asset test "$name" --repo "$GH_REPO" -y
+            done
+            gh release edit test --repo "$GH_REPO" --title Test --notes 'Rolling test build from main.' --prerelease --latest=false
+          else
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git tag -f test "$GITHUB_SHA"
+            git push origin refs/tags/test --force
+            gh release create test "${assets[@]}" --repo "$GH_REPO" --verify-tag --title Test --notes 'Rolling test build from main.' --prerelease --latest=false
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -f test "$GITHUB_SHA"
+          git push origin refs/tags/test --force
