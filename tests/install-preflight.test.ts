@@ -116,7 +116,7 @@ describe('install preflight classification', () => {
 })
 
 describe('runtime-facing installer behavior', () => {
-  test('--version reports release and compatibility metadata', () => {
+  test('--version reports the release version', () => {
     const repo = resolve(import.meta.dir, '..')
     const manifest = JSON.parse(readFileSync(join(repo, 'manifest.json'), 'utf8'))
     const result = spawnSync(process.execPath, [join(repo, 'src', 'jls-v04-core.ts'), '--version'], {
@@ -125,9 +125,6 @@ describe('runtime-facing installer behavior', () => {
     })
     expect(result.status).toBe(0)
     expect(result.stdout).toContain(manifest.version)
-    if (manifest.compatibility_version !== manifest.version) {
-      expect(result.stdout).toContain(manifest.compatibility_version)
-    }
   })
 
   test('explicit update fails when no installation matches the requested skill', () => {
@@ -136,7 +133,6 @@ describe('runtime-facing installer behavior', () => {
     const release = {
       installer: {
         version: '0.3.2',
-        compatibility_version: '0.4.0',
         artifacts: {
           'windows-x64': {
             url: 'https://fixture.invalid/jls-windows-x64.exe',
