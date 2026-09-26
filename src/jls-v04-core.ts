@@ -42,9 +42,7 @@ import {
 import { removeLegacyOwnershipMarker } from './legacy-ownership'
 import { renderResource } from './resource-render'
 import { compiledTarget } from './targets'
-import installerManifest from '../manifest.json'
-
-const VERSION = installerManifest.version
+const VERSION = process.env.JLS_BUILD_VERSION?.trim() || '0.0.0'
 const isWindows = platform() === 'win32'
 
 type Manifest = SkillPackageManifest
