@@ -101,7 +101,8 @@ jobs:
       - name: Launch compiled installer
         if: matrix.musl == false
         shell: bash
-        run: './build/${{ matrix.installer }}' --version
+        run: |
+          './build/${{ matrix.installer }}' --version
 
       - name: Launch musl installer in Alpine
         if: matrix.musl == true
