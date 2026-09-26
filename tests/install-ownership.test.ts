@@ -12,7 +12,6 @@ function runtimePackage(root = ''): any {
     manifest: {
       name: 'map',
       version: '0.4.0',
-      min_installer: '0.1.0',
       description: 'test',
       skill_files: ['SKILL.md'],
       runtime: 'rust',
@@ -32,7 +31,6 @@ function multiToolPackage(root = ''): any {
     manifest: {
       name: 'inspiration',
       version: '1.0.0',
-      min_installer: '0.4.1',
       description: 'test',
       skill_files: ['SKILL.md'],
       tools: {
