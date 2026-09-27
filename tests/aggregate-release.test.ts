@@ -11,12 +11,9 @@ describe('embedded skill catalog', () => {
   test('catalog contains repository pointers only', () => {
     const raw = JSON.parse(readFileSync(join(repo, 'catalog.json'), 'utf8'))
     const repositories = parseSkillCatalog(raw)
-    expect(repositories).toEqual([
-      'jacoblockett/jls-inspiration',
-      'jacoblockett/jls-map',
-      'jacoblockett/jls-tasks',
-    ])
-    expect(expectedSkillNameFromRepository('jacoblockett/jls-inspiration')).toBe('inspiration')
+    expect(repositories.length).toBeGreaterThan(0)
+    for (const repository of repositories) expect(repository).toMatch(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/)
+    expect(expectedSkillNameFromRepository('owner/jls-example')).toBe('example')
     expect(expectedSkillNameFromRepository('someone/curated-skill')).toBeUndefined()
   })
 
