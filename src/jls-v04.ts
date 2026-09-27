@@ -43,9 +43,8 @@ import {
 import { missingDependenciesText, missingSkillDependencies } from './skill-dependencies'
 import { prepareInstallerSelfUninstall } from './self-uninstall'
 import { main as lifecycleMain } from './jls-v04-core'
-import installerManifest from '../manifest.json'
-
-const VERSION = installerManifest.version
+// Source manifest.json is intentionally versionless; scripts/build.ts injects the compiled version.
+const VERSION = process.env.JLS_BUILD_VERSION?.trim() || '0.0.0'
 const isWindows = platform() === 'win32'
 
 type Scope = {
