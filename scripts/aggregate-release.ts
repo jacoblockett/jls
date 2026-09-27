@@ -23,7 +23,6 @@ export function aggregateRelease({ inputRoot, outputRoot }: AggregateOptions): v
   rmSync(outputRoot, { recursive: true, force: true })
   mkdirSync(outputRoot, { recursive: true })
 
-  const artifacts: Record<TargetKey, { url: string; sha256: string }> = {} as Record<TargetKey, { url: string; sha256: string }>
   for (const key of TARGET_KEYS) {
     const name = installerAssetName(targetByKey(key))
     const source = join(inputRoot, `target-${key}`, name)
