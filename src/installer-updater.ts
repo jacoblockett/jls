@@ -54,7 +54,7 @@ export type ReleasedSkill = {
   artifacts: SkillArtifactMap
 }
 
-export type ReleaseManifest = {
+export type AvailableSkills = {
   skills: Record<string, ReleasedSkill>
 }
 
@@ -309,7 +309,7 @@ async function resolveSkillRepository(
 export async function fetchAvailableSkills(
   repositories: readonly string[] = SKILL_REPOSITORIES,
   fetcher: FetchLike = fetch,
-): Promise<ReleaseManifest> {
+): Promise<AvailableSkills> {
   const resolved = await Promise.all(repositories.map((repository) => resolveSkillRepository(repository, fetcher)))
   const skills: Record<string, ReleasedSkill> = {}
 
