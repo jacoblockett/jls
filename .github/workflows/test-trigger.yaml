@@ -16,7 +16,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh workflow run test.yaml --repo "$GH_REPO" --ref main -f target=all
+        run: gh workflow run test.yaml --repo "$GH_REPO" --ref main
 
       - name: Delete ephemeral trigger branch
         if: always()
