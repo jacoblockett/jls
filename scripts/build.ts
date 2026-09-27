@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import { parseSkillCatalog } from '../src/skill-catalog'
 import {
   hostMatchesTarget,
   installerAssetName,
@@ -18,44 +18,18 @@ if (!hostMatchesTarget(buildTarget)) {
   throw new Error(`build target ${buildTarget.key} does not match this host OS/architecture`)
 }
 
-type SkillReference = { manifest_url: string }
-type Catalog = { skills: Record<string, SkillReference> }
-type InstallerManifest = { name: 'jls' }
+const installerManifest = JSON.parse(readFileSync(join(repo, 'manifest.json'), 'utf8')) as Record<string, unknown>
+if (installerManifest.name !== 'jls') throw new Error('installer manifest name must be jls')
 
-function sha256(path: string): string {
-  return createHash('sha256').update(readFileSync(path)).digest('hex')
-}
+// Validate the pointer-only catalog at build time. src/skill-catalog.ts imports the
+// same file, so Bun embeds this exact repository list into the executable.
+parseSkillCatalog(JSON.parse(readFileSync(join(repo, 'catalog.json'), 'utf8')))
 
-function readCatalog(): Catalog {
-  const raw = JSON.parse(readFileSync(join(repo, 'catalog.json'), 'utf8')) as Record<string, unknown>
-  if (!raw.skills || typeof raw.skills !== 'object' || Array.isArray(raw.skills)) {
-    throw new Error('catalog skills must be an object')
-  }
-
-  const skills: Record<string, SkillReference> = {}
-  for (const [name, value] of Object.entries(raw.skills as Record<string, unknown>)) {
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error(`invalid catalog skill name ${name}`)
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`invalid catalog skill ${name}`)
-    const manifestUrl = (value as Record<string, unknown>).manifest_url
-    if (typeof manifestUrl !== 'string' || !manifestUrl.trim()) throw new Error(`${name} catalog entry requires manifest_url`)
-    const parsed = new URL(manifestUrl)
-    if (parsed.protocol !== 'https:') throw new Error(`${name} manifest_url must use HTTPS`)
-    skills[name] = { manifest_url: manifestUrl }
-  }
-  return { skills }
-}
-
-function readInstallerManifest(): InstallerManifest {
-  const raw = JSON.parse(readFileSync(join(repo, 'manifest.json'), 'utf8')) as Record<string, unknown>
-  if (raw.name !== 'jls') throw new Error('installer manifest name must be jls')
-  return { name: 'jls' }
-}
-
-readInstallerManifest()
 const buildVersion = process.env.JLS_BUILD_VERSION?.trim()
 if (!buildVersion || !semver.test(buildVersion)) {
   throw new Error(`JLS_BUILD_VERSION must be plain semver: ${String(buildVersion)}`)
 }
+
 const installerName = installerAssetName(buildTarget)
 const output = join(out, installerName)
 rmSync(output, { force: true })
@@ -80,26 +54,4 @@ const installerBuild = Bun.spawnSync([
 })
 if (installerBuild.exitCode !== 0) process.exit(installerBuild.exitCode)
 
-const releaseTag = process.env.JLS_RELEASE_TAG?.trim() || 'dev'
-if (!/^[A-Za-z0-9._-]+$/.test(releaseTag)) throw new Error(`invalid release tag: ${releaseTag}`)
-const releaseBase = `https://github.com/jacoblockett/jls/releases/download/${releaseTag}`
-const catalog = readCatalog()
-
-const releaseManifest = {
-  installer: {
-    version: buildVersion,
-    artifacts: {
-      [buildTarget.key]: {
-        url: `${releaseBase}/${installerName}`,
-        sha256: sha256(output),
-      },
-    },
-  },
-  skills: catalog.skills,
-}
-
-const manifestOutput = join(out, 'manifest.json')
-writeFileSync(manifestOutput, `${JSON.stringify(releaseManifest, null, 2)}\n`)
-
 console.log(`Built ${output}`)
-console.log(`Built ${manifestOutput}`)
