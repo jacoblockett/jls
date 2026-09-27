@@ -218,7 +218,7 @@ export function removeGeneratedCleanup(
     const result = runner('bd', ['delete', ...batch, '--force'], scopeRoot)
     if (result.status !== 0) {
       const detail = result.stderr.trim() || result.stdout.trim() || `exit ${String(result.status)}`
-      throw new Error(`failed to remove Tasks-generated Beads issues: ${detail}`)
+      throw new Error(`failed to remove manifest-declared Beads issues: ${detail}`)
     }
   }
 }
