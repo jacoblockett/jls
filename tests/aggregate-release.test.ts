@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { aggregateRelease } from '../scripts/aggregate-release'
 import { expectedSkillNameFromRepository, parseSkillCatalog } from '../src/skill-catalog'
@@ -37,22 +37,12 @@ describe('installer release aggregation', () => {
       writeFileSync(join(dir, name), key)
     }
 
-    aggregateRelease({
-      inputRoot,
-      outputRoot,
-      version: '1.2.3',
-      releaseTag: 'test',
-    })
+    aggregateRelease({ inputRoot, outputRoot })
 
-    for (const key of TARGET_KEYS) {
-      const name = installerAssetName(targetByKey(key))
-      expect(existsSync(join(outputRoot, name))).toBe(true)
-    }
-
-    const legacyBridge = JSON.parse(readFileSync(join(outputRoot, 'manifest.json'), 'utf8'))
-    expect(legacyBridge.installer.version).toBe('1.2.3')
-    expect(Object.keys(legacyBridge.installer.artifacts)).toEqual([...TARGET_KEYS])
-    expect(legacyBridge.skills).toEqual({})
+    const expected = TARGET_KEYS
+      .map((key) => installerAssetName(targetByKey(key)))
+      .sort()
+    expect(readdirSync(outputRoot).sort()).toEqual(expected)
 
     rmSync(root, { recursive: true, force: true })
   })
