@@ -31,7 +31,7 @@ linux-arm64-musl
 
 The current stable GitHub release is the only persisted release-version authority. Repository source manifests do not carry release versions, and `package.json` is not a release manifest.
 
-Stable releases are manually dispatched through the Release workflow by choosing `major`, `minor`, `patch`, or `replace current`; `patch` is the default. Major/minor/patch increment the current stable version, using `0.0.0` as the baseline when no stable release exists. Replace current rebuilds the current stable version and replaces its release and tag after a successful build. The build injects the resolved version into generated release manifests and packaged skill manifests; source manifests remain versionless.
+Stable releases are manually dispatched through the Release workflow by choosing `major`, `minor`, `patch`, or `replace current`; `patch` is the default. Major/minor/patch increment the current stable version, using `0.0.0` as the baseline when no stable release exists. Replace current rebuilds the current stable version and replaces its release and tag after a successful build. The build injects the resolved version into the compiled installer or packaged skill manifest as appropriate; source manifests remain versionless.
 
 ## Interactive entry point
 
@@ -74,12 +74,7 @@ Which skills would you like to install?
 
 If the selected scope has no detected installations and JLS enters installation directly, it may provide that immediate context before the same question.
 
-Skill descriptions remain visible while the skill is focused. Current catalog presentation includes:
-
-```text
-Map
-Tasks (Compiles a goal into a taskset using Beads)
-```
+Skill descriptions remain visible while the skill is focused. Names, descriptions, dependencies, and other skill-specific metadata come from the skill repository, not from the JLS catalog.
 
 A skill already installed for every feasible detected harness is crossed out and suffixed:
 
@@ -332,11 +327,15 @@ The legacy singular `runtime` / `runtime_artifacts` / `runtime_cli` / `cli_token
 
 ## Release model
 
-JLS builds only the installer. Skill repositories own their skill packages and managed-tool builds.
+JLS builds only the installer. Skill repositories own their skill metadata, packages, managed-tool builds, and releases.
 
-The JLS stable release manifest references externally owned skill release manifests. Artifact selection is exact current target first, then an explicit `portable` fallback for skills only.
+The JLS catalog is a pointer-only array of GitHub repositories and is bundled into the compiled installer. JLS stores no skill names, descriptions, versions, dependencies, artifact URLs, or other skill-specific metadata in the catalog.
 
-Public installer filenames remain target-qualified. Tasks publishes its portable package as `tasks.zip`.
+At runtime, JLS resolves each catalog repository's latest stable GitHub Release. The stable tag is the skill version; GitHub release assets supply download URLs and SHA-256 digests. JLS reads that repository's source `manifest.json` at the same stable tag for the skill name, description, dependencies, and other repository-owned metadata needed before package download. For repositories named `jls-<skill>`, the manifest name must equal `<skill>`; curated repositories without the `jls-` prefix use the manifest-declared name.
+
+Skill release pages do not publish a separate release-level `manifest.json`. Target-specific packages use the generic `<skill>-<target>.zip` convention; portable packages use `<skill>.zip`. After download, the package's internal `manifest.json` remains the authoritative installation contract for files, harness resources, tools, tokens, generated-data ownership, and cleanup behavior.
+
+Installer self-update discovery is separate from skill discovery. The current installer version and target are intrinsic to the executable; JLS checks its own latest stable GitHub Release only to discover whether a newer installer exists and, if so, selects the target-qualified installer asset from GitHub release metadata.
 
 Stable releases are initiated only by the manual Release workflow. Source edits and source-manifest changes do not trigger stable releases. Major/minor/patch derive the next version from the current stable release; replace-current is the only path that intentionally republishes an existing stable version.
 
@@ -372,4 +371,4 @@ Test builds require no source-version change because source manifests do not tra
 
 Do not invent or persist future release numbers in repository source. A stable version exists only when resolved by the Release workflow and successfully published.
 
-Skill release manifests referenced by JLS must correspond to skill packages that actually contain the source-level contracts intended for that release. A source commit existing after an older stable package does not make that older package contain newer behavior.
+A skill's stable tag, source manifest at that tag, and released package assets form one release boundary. JLS must resolve metadata from that exact stable tag and must verify that the downloaded package manifest identifies the same skill and version. A later source commit does not change the contract of an older stable release.
