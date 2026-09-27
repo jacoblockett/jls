@@ -13,11 +13,6 @@ on:
         required: false
         default: ''
         type: string
-      release_tag:
-        description: Release tag used in generated artifact URLs
-        required: false
-        default: dev
-        type: string
 
 permissions:
   contents: read
@@ -82,7 +77,6 @@ jobs:
     runs-on: "${{ matrix.runner }}"
     env:
       JLS_BUILD_TARGET: ${{ matrix.target }}
-      JLS_RELEASE_TAG: ${{ inputs.release_tag }}
       JLS_BUILD_VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@v4
@@ -126,9 +120,7 @@ jobs:
           name: target-${{ matrix.target }}
           if-no-files-found: error
           retention-days: 14
-          path: |
-            build/${{ matrix.installer }}
-            build/manifest.json
+          path: build/${{ matrix.installer }}
 
   aggregate:
     needs: [prepare, build]
@@ -149,7 +141,6 @@ jobs:
 
       - name: Aggregate and verify complete installer release
         env:
-          JLS_RELEASE_TAG: ${{ inputs.release_tag }}
           JLS_AGGREGATE_INPUT: build/targets
           JLS_AGGREGATE_OUTPUT: build/release
         run: bun scripts/aggregate-release.ts
