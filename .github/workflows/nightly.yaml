@@ -40,7 +40,6 @@ jobs:
     uses: ./.github/workflows/build.yaml
     with:
       target: all
-      release_tag: nightly
 
   publish:
     needs: [check, build]
