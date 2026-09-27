@@ -167,21 +167,9 @@ The following skills you selected have data generated beyond its installation. I
 
 Detected generated-data cleanup options are selected by default.
 
-Current generated-data descriptions are:
+Generated-data descriptions and ownership rules come from the installed skill manifest. JLS may implement reusable cleanup primitives, but it does not hardcode which skill uses them or the metadata values that establish ownership.
 
-```text
-Map: SurrealKV database with surviving intent information from a previous session
-Tasks: Beads tasks/issues generated from a goal/intent
-```
-
-If no generated data is actually selected for removal, the uninstall confirmation stays flat:
-
-```text
-• Map
-• Tasks
-```
-
-When generated data is actually selected for removal, only relevant skills gain nested detail:
+If no generated data is actually selected for removal, the uninstall confirmation stays flat. When generated data is selected for removal, only relevant skills gain nested detail:
 
 ```text
 • Skill
@@ -191,37 +179,7 @@ When generated data is actually selected for removal, only relevant skills gain 
 
 A relevant skill whose generated state is being kept may show `Generated data: Keep` when nested detail is already necessary for the transaction.
 
-### Map generated-state ownership
-
-Map-generated state is bounded to the manifest-declared `.map` path. New ownership-aware packages require the exact JLS ownership marker declared by the package. Legacy marker evidence may bridge a missing new ownership marker only when positively identified; an invalid ownership marker always fails closed.
-
-JLS never removes generated paths outside the selected scope.
-
-### Tasks generated-state ownership
-
-Tasks owns only Beads issues newly created by Tasks with exact structured metadata:
-
-```json
-{"jls-tasks":"owned"}
-```
-
-Existing or reused issues never become Tasks-owned merely because Tasks reads or updates them.
-
-Detection uses the live `bd` CLI and exact metadata filtering:
-
-```text
-bd list --metadata-field jls-tasks=owned --json --limit 0
-```
-
-JLS verifies returned issue metadata structurally. Titles, descriptions, notes, labels, comments, and prose are never used to infer ownership.
-
-Immediately before deletion JLS re-runs the exact metadata query and deletes only the IDs that still match:
-
-```text
-bd delete <id...> --force
-```
-
-Deletion may be batched. JLS never deletes `.beads` itself. If `bd` is absent, generated Beads state is preserved. If `bd` is present but cannot safely inspect or delete the exact owned set, cleanup fails closed rather than broadening ownership.
+Manifest-declared path cleanup is bounded to the selected scope and requires the declared identifying marker at detection and again immediately before deletion. Manifest-declared structured cleanup adapters must use exact machine-readable ownership evidence; prose, titles, comments, or heuristic matches never establish ownership. If an adapter cannot safely identify or delete the exact declared owned set, cleanup fails closed rather than broadening ownership.
 
 ## Execution feedback
 
