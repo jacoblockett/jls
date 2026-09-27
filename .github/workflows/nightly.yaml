@@ -40,7 +40,6 @@ jobs:
     uses: ./.github/workflows/build.yaml
     with:
       target: all
-      release_tag: nightly
 
   publish:
     needs: [check, build]
@@ -64,15 +63,11 @@ jobs:
           mapfile -t assets < <(find build/release -maxdepth 1 -type f -print | sort)
           (( ${#assets[@]} > 0 )) || { echo 'Verified release bundle is empty.' >&2; exit 1; }
 
+          # Rolling releases are replaced as a whole so removed assets can never survive.
           if gh release view nightly --repo "$GH_REPO" >/dev/null 2>&1; then
-            gh release upload nightly "${assets[@]}" --repo "$GH_REPO" --clobber
-            mapfile -t existing < <(gh release view nightly --repo "$GH_REPO" --json assets --jq '.assets[].name')
-            for name in "${existing[@]}"; do
-              [[ -f "build/release/$name" ]] || gh release delete-asset nightly "$name" --repo "$GH_REPO" -y
-            done
-          else
-            gh release create nightly "${assets[@]}" --repo "$GH_REPO" --title Nightly --notes 'Rolling production-test build from main.' --prerelease --target "$GITHUB_SHA"
+            gh release delete nightly --repo "$GH_REPO" --cleanup-tag --yes
           fi
+          gh release create nightly "${assets[@]}" --repo "$GH_REPO" --title Nightly --notes 'Rolling production-test build from main.' --prerelease --target "$GITHUB_SHA"
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
