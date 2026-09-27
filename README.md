@@ -4,17 +4,7 @@ JLS is a cross-platform installer for a curated set of AI coding-agent skills. I
 
 ## Skills
 
-### [Inspiration](https://github.com/jacoblockett/jls-inspiration)
-
-Inspiration researches visual design and product/UX direction through separate researcher and auditor tracks, durable source history, direct visual evidence, and a synthesized implementation-guidance report.
-
-### [Map](https://github.com/jacoblockett/jls-map)
-
-Map is a local, durable intent graph for preserving project goals, open questions, decisions, facts, and rationale across long-running agent work. It provides a structured clarification workflow so important context survives beyond a single conversation or context window.
-
-### [Tasks](https://github.com/jacoblockett/jls-tasks)
-
-Tasks exhaustively converts authoritative goals, specifications, plans, and structured source material into small, self-contained work items while preserving source coverage, provenance, constraints, and dependencies. It currently uses Beads as its native task backend.
+The curated skill set is defined only by the repository pointers in `catalog.json`. The compiled installer embeds those pointers and resolves each skill's name, description, dependencies, version, and release assets from the skill repository itself.
 
 ## Install
 
