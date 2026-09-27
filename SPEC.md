@@ -295,6 +295,8 @@ Skill release pages do not publish a separate release-level `manifest.json`. Tar
 
 Installer self-update discovery is separate from skill discovery. The current installer version and target are intrinsic to the executable; JLS checks its own latest stable GitHub Release only to discover whether a newer installer exists and, if so, selects the target-qualified installer asset from GitHub release metadata.
 
+JLS releases also carry a minimal `manifest.json` containing only installer version/artifact metadata and an empty `skills` object as a migration bridge for already-released installers that still use the legacy self-update endpoint. Current installers never read this file, and it must never regain skill catalog data.
+
 Stable releases are initiated only by the manual Release workflow. Source edits and source-manifest changes do not trigger stable releases. Major/minor/patch derive the next version from the current stable release; replace-current is the only path that intentionally republishes an existing stable version.
 
 The workflow layout is:
