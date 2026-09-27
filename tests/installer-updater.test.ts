@@ -7,13 +7,12 @@ import {
   checkInstallerUpdate,
   compareVersions,
   downloadSkillPackage,
-  fetchStableReleaseManifest,
+  fetchAvailableSkills,
   packageToolFiles,
   packageTools,
-  parseReleaseManifest,
+  parseGitHubRelease,
   parseSkillPackageManifest,
-  parseSkillReleaseManifest,
-  selectInstallerArtifact,
+  parseSkillRepositoryManifest,
   selectSkillArtifact,
   type ReleasedSkill,
 } from '../src/installer-updater'
@@ -32,29 +31,9 @@ function sha256(data: Uint8Array | string): string {
   return createHash('sha256').update(data).digest('hex')
 }
 
-function releaseIndex(installerVersion = '0.7.0') {
-  return {
-    installer: {
-      version: installerVersion,
-      artifacts: {
-        'windows-x64': {
-          url: 'https://fixture.invalid/jls-windows-x64.exe',
-          sha256: '0'.repeat(64),
-        },
-      },
-    },
-    skills: {
-      'example-skill': {
-        manifest_url: 'https://fixture.invalid/example-skill-manifest.json',
-      },
-    },
-  }
-}
-
-function skillRelease(version = '1.2.3', sha = '1'.repeat(64)) {
+function skillManifest() {
   return {
     name: 'example-skill',
-    version,
     description: 'Example skill',
     dependencies: [{
       name: 'Example CLI',
@@ -64,31 +43,60 @@ function skillRelease(version = '1.2.3', sha = '1'.repeat(64)) {
         path: ['tools/example'],
       },
     }],
-    artifacts: {
-      'windows-x64': {
-        url: 'https://fixture.invalid/example-skill-windows-x64.zip',
-        sha256: sha,
-      },
-    },
+    skill_files: ['SKILL.md'],
   }
 }
 
-function fixtureFetcher(index: unknown, skill: unknown | null = skillRelease(), archive?: Uint8Array): typeof fetch {
+function skillRelease(version = '1.2.3', portable = false) {
+  const name = portable ? 'example-skill.zip' : 'example-skill-windows-x64.zip'
+  return {
+    tag_name: `v${version}`,
+    draft: false,
+    prerelease: false,
+    assets: [{
+      name,
+      browser_download_url: `https://fixture.invalid/${name}`,
+      digest: `sha256:${'1'.repeat(64)}`,
+    }],
+  }
+}
+
+function installerRelease(version = '0.8.0') {
+  return {
+    tag_name: `v${version}`,
+    draft: false,
+    prerelease: false,
+    assets: [{
+      name: 'jls-windows-x64.exe',
+      browser_download_url: 'https://fixture.invalid/jls-windows-x64.exe',
+      digest: `sha256:${'2'.repeat(64)}`,
+    }],
+  }
+}
+
+function discoveryFetcher(release: unknown = skillRelease(), manifest: unknown = skillManifest()): typeof fetch {
   return (async (input: any) => {
     const url = String(input)
-    if (url === 'https://fixture.invalid/manifest.json') return Response.json(index)
-    if (url === 'https://fixture.invalid/example-skill-manifest.json') {
-      return skill === null ? new Response('missing', { status: 404 }) : Response.json(skill)
+    if (url === 'https://api.github.com/repos/owner/jls-example-skill/releases/latest') {
+      return release === null ? new Response('missing', { status: 404 }) : Response.json(release)
     }
-    if (archive && (
-      url === 'https://fixture.invalid/example-skill-windows-x64.zip'
-      || url === 'https://fixture.invalid/example-skill.zip'
-    )) return new Response(archive)
+    if (url === 'https://raw.githubusercontent.com/owner/jls-example-skill/v1.2.3/manifest.json') {
+      return Response.json(manifest)
+    }
     return new Response('missing', { status: 404 })
   }) as typeof fetch
 }
 
-describe('release metadata', () => {
+// Package-contract tests below only need an archive fetcher; retain this helper
+// shape so those focused tests stay independent from repository discovery.
+function fixtureFetcher(_release: unknown, _manifest: unknown, archive?: Uint8Array): typeof fetch {
+  return (async (input: any) => {
+    if (archive && String(input).endsWith('.zip')) return new Response(archive)
+    return new Response('missing', { status: 404 })
+  }) as typeof fetch
+}
+
+describe('repository release discovery', () => {
   test('semantic versions compare deterministically', () => {
     expect(compareVersions('0.5.0', '0.5.0')).toBe(0)
     expect(compareVersions('0.5.0', '0.6.0')).toBe(-1)
@@ -96,94 +104,96 @@ describe('release metadata', () => {
     expect(() => compareVersions('0.5.0-nightly', '0.5.0')).toThrow()
   })
 
-  test('JLS release manifest contains installer artifacts and external skill references', () => {
-    const parsed = parseReleaseManifest(releaseIndex())
-    expect(parsed.installer.version).toBe('0.7.0')
-    expect(parsed.skills['example-skill'].manifest_url).toBe('https://fixture.invalid/example-skill-manifest.json')
+  test('GitHub release metadata must describe a stable release', () => {
+    expect(parseGitHubRelease(skillRelease()).tag_name).toBe('v1.2.3')
+    expect(() => parseGitHubRelease({ ...skillRelease(), prerelease: true })).toThrow()
   })
 
-  test('legacy extra manifest metadata does not block current manifests', () => {
-    expect(parseReleaseManifest({ ...releaseIndex(), format: 3 }).installer.version).toBe('0.7.0')
-    expect(parseSkillReleaseManifest('example-skill', { ...skillRelease(), format: 1 }).version).toBe('1.2.3')
-  })
-
-  test('external skill manifest profile metadata round-trips with artifacts', () => {
-    const released = parseSkillReleaseManifest('example-skill', skillRelease())
-    expect(released.version).toBe('1.2.3')
-    expect(released.description).toBe('Example skill')
-    expect(released.dependencies?.[0]).toEqual({
-      name: 'Example CLI',
-      install_url: 'https://fixture.invalid/install',
-      detect: {
-        command: ['example'],
-        path: ['tools/example'],
-      },
+  test('skill metadata comes from the skill repository manifest', () => {
+    const parsed = parseSkillRepositoryManifest('owner/jls-example-skill', skillManifest())
+    expect(parsed.name).toBe('example-skill')
+    expect(parsed.description).toBe('Example skill')
+    expect(parsed.dependencies?.[0].detect).toEqual({
+      command: ['example'],
+      path: ['tools/example'],
     })
-    expect(released.artifacts['windows-x64']?.url).toEndWith('/example-skill-windows-x64.zip')
-    expect(() => parseSkillReleaseManifest('other', skillRelease())).toThrow()
+
+    expect(() => parseSkillRepositoryManifest('owner/jls-other', skillManifest())).toThrow()
+    expect(parseSkillRepositoryManifest('owner/curated-repository', skillManifest()).name).toBe('example-skill')
   })
 
-  test('dependency detection metadata requires at least one non-empty command or path array', () => {
-    expect(() => parseSkillReleaseManifest('example-skill', {
-      ...skillRelease(),
+  test('dependency detection metadata requires command and/or path', () => {
+    expect(() => parseSkillRepositoryManifest('owner/jls-example-skill', {
+      ...skillManifest(),
       dependencies: [{
         name: 'Example CLI',
         install_url: 'https://fixture.invalid/install',
         detect: {},
       }],
     })).toThrow()
-    expect(() => parseSkillReleaseManifest('example-skill', {
-      ...skillRelease(),
-      dependencies: [{
-        name: 'Example CLI',
-        install_url: 'https://fixture.invalid/install',
-        detect: { command: [] },
-      }],
-    })).toThrow()
   })
 
-  test('stable release fetch resolves referenced skill manifests', async () => {
-    const resolved = await fetchStableReleaseManifest(
-      'https://fixture.invalid/manifest.json',
-      fixtureFetcher(releaseIndex())
+  test('embedded repository pointers resolve current stable skill releases', async () => {
+    const resolved = await fetchAvailableSkills(
+      ['owner/jls-example-skill'],
+      discoveryFetcher(),
     )
-    expect(resolved?.skills['example-skill'].version).toBe('1.2.3')
-    expect(resolved?.skills['example-skill'].description).toBe('Example skill')
+    expect(resolved.skills['example-skill'].version).toBe('1.2.3')
+    expect(resolved.skills['example-skill'].description).toBe('Example skill')
+    expect(resolved.skills['example-skill'].artifacts['windows-x64']?.url)
+      .toBe('https://fixture.invalid/example-skill-windows-x64.zip')
   })
 
-  test('unpublished referenced skills are omitted without breaking installer update discovery', async () => {
-    const resolved = await fetchStableReleaseManifest(
-      'https://fixture.invalid/manifest.json',
-      fixtureFetcher(releaseIndex(), null)
+  test('catalog repositories without a stable release are omitted', async () => {
+    const resolved = await fetchAvailableSkills(
+      ['owner/jls-example-skill'],
+      discoveryFetcher(null),
     )
-    expect(resolved?.skills).toEqual({})
+    expect(resolved.skills).toEqual({})
   })
 
   test('artifact selection remains exact-target with explicit portable fallback only', () => {
-    const native = parseSkillReleaseManifest('example-skill', skillRelease())
+    const native: ReleasedSkill = {
+      version: '1.2.3',
+      artifacts: {
+        'windows-x64': {
+          url: 'https://fixture.invalid/example-skill-windows-x64.zip',
+          sha256: '1'.repeat(64),
+        },
+      },
+    }
     expect(selectSkillArtifact('example-skill', native, 'windows-x64').key).toBe('windows-x64')
     expect(() => selectSkillArtifact('example-skill', native, 'linux-x64-gnu')).toThrow()
 
-    const portable = parseSkillReleaseManifest('example-skill', {
-      ...skillRelease(),
+    const portable: ReleasedSkill = {
+      version: '1.2.3',
       artifacts: {
-        portable: { url: 'https://fixture.invalid/example-skill-portable.zip', sha256: '2'.repeat(64) },
+        portable: {
+          url: 'https://fixture.invalid/example-skill.zip',
+          sha256: '1'.repeat(64),
+        },
       },
-    })
+    }
     expect(selectSkillArtifact('example-skill', portable, 'linux-arm64-musl').key).toBe('portable')
-    const index = parseReleaseManifest(releaseIndex())
-    expect(selectInstallerArtifact(index, 'windows-x64').url).toEndWith('/jls-windows-x64.exe')
   })
 
-  test('installer update does not need to fetch external skill manifests', async () => {
-    const index = releaseIndex('0.8.0')
+  test('installer self-update reads GitHub release metadata without skill discovery', async () => {
     const fetcher = (async (input: any) => {
       const url = String(input)
-      if (url === 'https://fixture.invalid/manifest.json') return Response.json(index)
+      if (url === 'https://api.github.com/repos/jacoblockett/jls/releases/latest') {
+        return Response.json(installerRelease())
+      }
       throw new Error(`unexpected fetch ${url}`)
     }) as typeof fetch
-    const update = await checkInstallerUpdate('0.7.0', 'https://fixture.invalid/manifest.json', fetcher, 'windows-x64')
+
+    const update = await checkInstallerUpdate(
+      '0.7.0',
+      'jacoblockett/jls',
+      fetcher,
+      'windows-x64',
+    )
     expect(update?.version).toBe('0.8.0')
+    expect(update?.artifact.url).toEndWith('/jls-windows-x64.exe')
   })
 })
 
