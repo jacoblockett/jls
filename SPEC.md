@@ -342,7 +342,7 @@ Stable releases are initiated only by the manual Release workflow. Source edits 
 
 The workflow layout is:
 - `build.yaml`: reusable build/package implementation only, exposed in Actions as `Build (Do Not Use)`;
-- `test.yaml`: manual non-stable test build, with target selection defaulting to `all` where target-specific executables exist; successful runs replace the rolling `Test` prerelease/tag and expose the built files as direct release assets;
+- `test.yaml`: manual non-stable test build with no target input; it always builds the complete supported target set where targets exist, and successful runs replace the rolling `Test` prerelease/tag using the exact verified `release-bundle` shape used by Nightly and stable Release;
 - `nightly.yaml`: scheduled nightly build/publish with no manual inputs;
 - `release.yaml`: manual stable release version action;
 - `test-trigger.yaml`: branch-create bridge for `jls-test/**` ephemeral test branches.
@@ -357,7 +357,7 @@ A lightweight workflow listens for creation of an ephemeral branch matching:
 jls-test/**
 ```
 
-The test trigger dispatches the repository's Test workflow from `main` and then deletes the trigger branch. For target-specific repositories, assistant-triggered tests request the complete supported target matrix.
+The test trigger dispatches the repository's Test workflow from `main` and then deletes the trigger branch. Test itself owns the invariant that target-specific repositories always build the complete supported target matrix.
 
 The intended assistant workflow is:
 
