@@ -17,7 +17,7 @@ import {
   parseSkillPackageManifest,
   stageInstallerUpdate,
   type DownloadedSkillPackage,
-  type ReleaseManifest,
+  type AvailableSkills,
   type SkillPackageManifest,
 } from './installer-updater'
 import { prepareInstallerReplacement } from './installer-replacement'
@@ -366,7 +366,7 @@ function humanList(values: string[]): string {
   return `${values.slice(0, -1).join(', ')}, and ${values.at(-1)}`
 }
 
-async function fetchRelease(state: WizardState, message: string): Promise<ReleaseManifest> {
+async function fetchRelease(state: WizardState, message: string): Promise<AvailableSkills> {
   ensureIntro(state)
   const spinner = prompts.spinner({ withGuide: false })
   spinner.start(message)
@@ -382,7 +382,7 @@ async function fetchRelease(state: WizardState, message: string): Promise<Releas
 async function acknowledgeMissingDependencies(
   state: WizardState,
   stepId: string,
-  release: ReleaseManifest,
+  release: AvailableSkills,
   skills: string[],
   scope: Scope,
 ): Promise<true | typeof BACK_SIGNAL> {
