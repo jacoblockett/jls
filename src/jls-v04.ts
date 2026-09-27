@@ -11,7 +11,7 @@ import {
   checkInstallerUpdate,
   compareVersions,
   downloadSkillPackage,
-  fetchStableReleaseManifest,
+  fetchAvailableSkills,
   packageToolFiles,
   packageTools,
   parseSkillPackageManifest,
@@ -371,8 +371,8 @@ async function fetchRelease(state: WizardState, message: string): Promise<Releas
   const spinner = prompts.spinner({ withGuide: false })
   spinner.start(message)
   try {
-    const release = await fetchStableReleaseManifest()
-    if (!release) throw new Error('no stable JLS release is currently available')
+    const release = await fetchAvailableSkills()
+    if (!release) throw new Error('no published skills are currently available')
     return release
   } finally {
     spinner.clear()
@@ -487,7 +487,7 @@ function updateAvailable(group: InstallGroup, available: Record<string, string>)
 
 function updateStatus(group: InstallGroup, available: Record<string, string>): string {
   const version = available[group.skill]
-  if (!version) throw new Error(`stable release does not contain ${group.skill}`)
+  if (!version) throw new Error(`available skill catalog does not contain ${group.skill}`)
   const stale = installedVersions(group).filter((installed) => {
     try {
       return compareVersions(installed, version) < 0
@@ -800,7 +800,7 @@ async function updateAtScope(scope: Scope, state: WizardState, prefix: string): 
 
     const targets = groups.map((group) => {
       const version = availableVersions[group.skill]
-      if (!version) throw new Error(`stable release does not contain ${group.skill}`)
+      if (!version) throw new Error(`available skill catalog does not contain ${group.skill}`)
       return {
         group,
         agents: group.targets
