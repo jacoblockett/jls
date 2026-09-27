@@ -21,7 +21,7 @@ import {
 import { classifyInstallTargets, staleUpdateTargets, type InstallTargetState } from './install-preflight'
 import {
   downloadSkillPackage,
-  fetchStableReleaseManifest,
+  fetchAvailableSkills,
   packageToolFiles,
   packageTools,
   parseSkillPackageManifest,
@@ -570,7 +570,7 @@ function requireScope(parsed: ParsedAction): Scope {
 }
 
 function requireRelease(release: ReleaseManifest | null): ReleaseManifest {
-  if (!release) throw new Error('no stable JLS release is currently available')
+  if (!release) throw new Error('no published skills are currently available')
   return release
 }
 
@@ -580,7 +580,7 @@ function availableVersions(release: ReleaseManifest): Record<string, string> {
 
 function ensureReleased(release: ReleaseManifest, skills: string[]): void {
   for (const skill of skills) {
-    if (!release.skills[skill]) throw new Error(`stable release does not contain ${skill}`)
+    if (!release.skills[skill]) throw new Error(`available skill catalog does not contain ${skill}`)
   }
 }
 
@@ -589,7 +589,7 @@ async function installCommand(args: string[]): Promise<number> {
   const scope = requireScope(parsed)
   if (parsed.skills.length === 0) throw new Error('no skills selected')
 
-  const release = requireRelease(await fetchStableReleaseManifest())
+  const release = requireRelease(await fetchAvailableSkills())
   ensureReleased(release, parsed.skills)
   const agents = parsed.agents.length > 0 ? normalizeAgents(parsed.agents) : detectedAgents()
   if (agents.length === 0) throw new Error('no supported AI harness detected; specify --agent')
@@ -655,7 +655,7 @@ async function updateCommand(args: string[]): Promise<number> {
   if (parsed.skills.length > 0 && groups.length === 0) {
     throw new Error('no installations match update filters')
   }
-  const release = requireRelease(await fetchStableReleaseManifest())
+  const release = requireRelease(await fetchAvailableSkills())
 
   for (const group of groups) {
     const released = release.skills[group.skill]
