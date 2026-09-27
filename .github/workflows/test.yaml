@@ -15,7 +15,6 @@ jobs:
     uses: ./.github/workflows/build.yaml
     with:
       target: all
-      release_tag: test
 
   publish:
     needs: build
@@ -41,16 +40,11 @@ jobs:
           mapfile -t assets < <(find build/release -maxdepth 1 -type f -print | sort)
           (( ${#assets[@]} > 0 )) || { echo 'Verified release bundle is empty.' >&2; exit 1; }
 
+          # Rolling releases are replaced as a whole so removed assets can never survive.
           if gh release view test --repo "$GH_REPO" >/dev/null 2>&1; then
-            gh release upload test "${assets[@]}" --repo "$GH_REPO" --clobber
-            mapfile -t existing < <(gh release view test --repo "$GH_REPO" --json assets --jq '.assets[].name')
-            for name in "${existing[@]}"; do
-              [[ -f "build/release/$name" ]] || gh release delete-asset test "$name" --repo "$GH_REPO" -y
-            done
-            gh release edit test --repo "$GH_REPO" --title Test --notes 'Rolling test build from main.' --prerelease --latest=false
-          else
-            gh release create test "${assets[@]}" --repo "$GH_REPO" --title Test --notes 'Rolling test build from main.' --prerelease --latest=false --target "$GITHUB_SHA"
+            gh release delete test --repo "$GH_REPO" --cleanup-tag --yes
           fi
+          gh release create test "${assets[@]}" --repo "$GH_REPO" --title Test --notes 'Rolling test build from main.' --prerelease --latest=false --target "$GITHUB_SHA"
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
