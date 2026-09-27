@@ -13,11 +13,6 @@ on:
         required: false
         default: ''
         type: string
-      release_tag:
-        description: Release tag used only by the legacy self-update bridge manifest
-        required: false
-        default: dev
-        type: string
 
 permissions:
   contents: read
@@ -148,8 +143,6 @@ jobs:
         env:
           JLS_AGGREGATE_INPUT: build/targets
           JLS_AGGREGATE_OUTPUT: build/release
-          JLS_BUILD_VERSION: ${{ needs.prepare.outputs.version }}
-          JLS_RELEASE_TAG: ${{ inputs.release_tag }}
         run: bun scripts/aggregate-release.ts
 
       - name: Upload verified release bundle
