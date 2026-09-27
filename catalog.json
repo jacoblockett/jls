@@ -1,13 +1,5 @@
-{
-  "skills": {
-    "inspiration": {
-      "manifest_url": "https://github.com/jacoblockett/jls-inspiration/releases/latest/download/manifest.json"
-    },
-    "map": {
-      "manifest_url": "https://github.com/jacoblockett/jls-map/releases/latest/download/manifest.json"
-    },
-    "tasks": {
-      "manifest_url": "https://github.com/jacoblockett/jls-tasks/releases/latest/download/manifest.json"
-    }
-  }
-}
+[
+  "jacoblockett/jls-inspiration",
+  "jacoblockett/jls-map",
+  "jacoblockett/jls-tasks"
+]
