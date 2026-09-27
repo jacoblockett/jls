@@ -295,14 +295,14 @@ Skill release pages do not publish a separate release-level `manifest.json`. Tar
 
 Installer self-update discovery is separate from skill discovery. The current installer version and target are intrinsic to the executable; JLS checks its own latest stable GitHub Release only to discover whether a newer installer exists and, if so, selects the target-qualified installer asset from GitHub release metadata.
 
-JLS releases also carry a minimal `manifest.json` containing only installer version/artifact metadata and an empty `skills` object as a migration bridge for already-released installers that still use the legacy self-update endpoint. Current installers never read this file, and it must never regain skill catalog data.
+JLS release pages contain only the target-specific installer binaries. Release-level `manifest.json` files are not published. Installer version, target selection, asset URLs, and SHA-256 digests come from the compiled executable and GitHub Release metadata rather than a duplicated release manifest.
 
 Stable releases are initiated only by the manual Release workflow. Source edits and source-manifest changes do not trigger stable releases. Major/minor/patch derive the next version from the current stable release; replace-current is the only path that intentionally republishes an existing stable version.
 
 The workflow layout is:
 - `build.yaml`: reusable build/package implementation only, exposed in Actions as `Build (Do Not Use)`;
-- `test.yaml`: manual non-stable test build with no target input; it always builds the complete supported target set where targets exist, and successful runs replace the rolling `Test` prerelease/tag using the exact verified `release-bundle` shape used by Nightly and stable Release;
-- `nightly.yaml`: scheduled nightly build/publish with no manual inputs;
+- `test.yaml`: manual non-stable test build with no target input; it always builds the complete supported target set where targets exist, and successful runs delete and recreate the rolling `Test` prerelease/tag from the exact verified `release-bundle`, so no asset from a previous build can survive;
+- `nightly.yaml`: scheduled nightly build/publish with no manual inputs; when a build is warranted, it likewise deletes and recreates the rolling `Nightly` prerelease/tag from the verified bundle rather than synchronizing assets in place;
 - `release.yaml`: manual stable release version action;
 - `test-trigger.yaml`: branch-create bridge for `jls-test/**` ephemeral test branches.
 
