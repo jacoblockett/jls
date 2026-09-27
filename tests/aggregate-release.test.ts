@@ -37,12 +37,22 @@ describe('installer release aggregation', () => {
       writeFileSync(join(dir, name), key)
     }
 
-    aggregateRelease({ inputRoot, outputRoot })
+    aggregateRelease({
+      inputRoot,
+      outputRoot,
+      version: '1.2.3',
+      releaseTag: 'test',
+    })
 
     for (const key of TARGET_KEYS) {
       const name = installerAssetName(targetByKey(key))
       expect(existsSync(join(outputRoot, name))).toBe(true)
     }
+
+    const legacyBridge = JSON.parse(readFileSync(join(outputRoot, 'manifest.json'), 'utf8'))
+    expect(legacyBridge.installer.version).toBe('1.2.3')
+    expect(Object.keys(legacyBridge.installer.artifacts)).toEqual([...TARGET_KEYS])
+    expect(legacyBridge.skills).toEqual({})
 
     rmSync(root, { recursive: true, force: true })
   })
