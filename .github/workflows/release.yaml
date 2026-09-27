@@ -81,6 +81,7 @@ jobs:
     with:
       target: all
       version: ${{ needs.prepare.outputs.version }}
+      release_tag: ${{ needs.prepare.outputs.release_tag }}
 
   publish:
     needs: [prepare, build]
