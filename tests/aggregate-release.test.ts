@@ -1,37 +1,52 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { catalogSkillReferences } from '../scripts/aggregate-release'
+import { aggregateRelease } from '../scripts/aggregate-release'
+import { expectedSkillNameFromRepository, parseSkillCatalog } from '../src/skill-catalog'
+import { TARGET_KEYS, installerAssetName, targetByKey } from '../src/targets'
 
 const repo = resolve(import.meta.dir, '..')
 
-describe('release catalog projection', () => {
-  test('catalog exposes usable skill release discovery references', () => {
-    const catalog = JSON.parse(readFileSync(join(repo, 'catalog.json'), 'utf8')) as Record<string, any>
-    expect(catalog.skills && typeof catalog.skills === 'object' && !Array.isArray(catalog.skills)).toBe(true)
-
-    const entries = Object.entries(catalog.skills as Record<string, any>)
-    expect(entries.length).toBeGreaterThan(0)
-    for (const [name, reference] of entries) {
-      expect(name).toMatch(/^[a-z0-9][a-z0-9-]*$/)
-      expect(reference && typeof reference === 'object' && !Array.isArray(reference)).toBe(true)
-      expect(typeof reference.manifest_url).toBe('string')
-      expect(reference.manifest_url.trim().length).toBeGreaterThan(0)
-      expect(new URL(reference.manifest_url).protocol).toBe('https:')
-    }
+describe('embedded skill catalog', () => {
+  test('catalog contains repository pointers only', () => {
+    const raw = JSON.parse(readFileSync(join(repo, 'catalog.json'), 'utf8'))
+    const repositories = parseSkillCatalog(raw)
+    expect(repositories).toEqual([
+      'jacoblockett/jls-inspiration',
+      'jacoblockett/jls-map',
+      'jacoblockett/jls-tasks',
+    ])
+    expect(expectedSkillNameFromRepository('jacoblockett/jls-inspiration')).toBe('inspiration')
+    expect(expectedSkillNameFromRepository('someone/curated-skill')).toBeUndefined()
   })
 
-  test('projects catalog entries into release-owned manifest references', () => {
-    const references = {
-      alpha: { manifest_url: 'https://fixture.invalid/alpha/manifest.json' },
-      beta: { manifest_url: 'https://fixture.invalid/beta/manifest.json' },
-    }
-    expect(catalogSkillReferences(references)).toEqual(references)
+  test('rejects malformed or duplicate repository pointers', () => {
+    expect(() => parseSkillCatalog(['not-a-repository'])).toThrow()
+    expect(() => parseSkillCatalog(['owner/repo', 'owner/repo'])).toThrow()
   })
+})
 
-  test('rejects unusable release-owned manifest references', () => {
-    expect(() => catalogSkillReferences({
-      alpha: { manifest_url: 'http://example.com/manifest.json' },
-    })).toThrow()
+describe('installer release aggregation', () => {
+  test('copies exactly one executable for every supported target', () => {
+    const root = join(repo, 'build', 'aggregate-release-test')
+    const inputRoot = join(root, 'targets')
+    const outputRoot = join(root, 'release')
+    rmSync(root, { recursive: true, force: true })
+
+    for (const key of TARGET_KEYS) {
+      const name = installerAssetName(targetByKey(key))
+      const dir = join(inputRoot, `target-${key}`)
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, name), key)
+    }
+
+    aggregateRelease({ inputRoot, outputRoot })
+
+    for (const key of TARGET_KEYS) {
+      const name = installerAssetName(targetByKey(key))
+      expect(existsSync(join(outputRoot, name))).toBe(true)
+    }
+
+    rmSync(root, { recursive: true, force: true })
   })
 })
