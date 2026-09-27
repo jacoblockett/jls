@@ -26,7 +26,7 @@ import {
   packageTools,
   parseSkillPackageManifest,
   type DownloadedSkillPackage,
-  type ReleaseManifest,
+  type AvailableSkills,
   type SkillPackageManifest,
 } from './installer-updater'
 import { detectInstallCollisions } from './install-collision-override'
@@ -569,16 +569,16 @@ function requireScope(parsed: ParsedAction): Scope {
   return resolveScope(parsed.scope)
 }
 
-function requireRelease(release: ReleaseManifest | null): ReleaseManifest {
+function requireRelease(release: AvailableSkills | null): AvailableSkills {
   if (!release) throw new Error('no published skills are currently available')
   return release
 }
 
-function availableVersions(release: ReleaseManifest): Record<string, string> {
+function availableVersions(release: AvailableSkills): Record<string, string> {
   return Object.fromEntries(Object.entries(release.skills).map(([name, skill]) => [name, skill.version]))
 }
 
-function ensureReleased(release: ReleaseManifest, skills: string[]): void {
+function ensureReleased(release: AvailableSkills, skills: string[]): void {
   for (const skill of skills) {
     if (!release.skills[skill]) throw new Error(`available skill catalog does not contain ${skill}`)
   }
