@@ -12,13 +12,21 @@ import {
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { containedPath, extractZip } from './archive'
-import { compiledTarget, isTargetKey, type TargetKey } from './targets'
+import { expectedSkillNameFromRepository, SKILL_REPOSITORIES } from './skill-catalog'
+import {
+  compiledTarget,
+  installerAssetName,
+  isTargetKey,
+  TARGET_KEYS,
+  targetByKey,
+  type TargetKey,
+} from './targets'
 
 if (Bun.isStandaloneExecutable) compiledTarget()
 
-export const DEFAULT_RELEASE_MANIFEST_URL = 'https://github.com/jacoblockett/jls/releases/latest/download/manifest.json'
-
 type FetchLike = typeof fetch
+
+export const INSTALLER_REPOSITORY = 'jacoblockett/jls'
 
 export type ReleaseArtifact = {
   url: string
@@ -46,23 +54,7 @@ export type ReleasedSkill = {
   artifacts: SkillArtifactMap
 }
 
-export type SkillReference = {
-  manifest_url: string
-}
-
-export type ReleaseIndex = {
-  installer: {
-    version: string
-    artifacts: TargetArtifactMap
-  }
-  skills: Record<string, SkillReference>
-}
-
 export type ReleaseManifest = {
-  installer: {
-    version: string
-    artifacts: TargetArtifactMap
-  }
   skills: Record<string, ReleasedSkill>
 }
 
@@ -112,6 +104,25 @@ export type DownloadedSkillPackage = {
 export type SelectedSkillArtifact = {
   key: TargetKey | 'portable'
   artifact: ReleaseArtifact
+}
+
+type GitHubReleaseAsset = {
+  name: string
+  browser_download_url: string
+  digest?: string | null
+}
+
+type GitHubRelease = {
+  tag_name: string
+  draft: boolean
+  prerelease: boolean
+  assets: GitHubReleaseAsset[]
+}
+
+type SkillRepositoryMetadata = {
+  name: string
+  description: string
+  dependencies?: SkillDependency[]
 }
 
 function semverParts(version: string): [number, number, number] | undefined {
@@ -170,130 +181,150 @@ function parseDependencies(value: unknown, label: string): SkillDependency[] | u
   })
 }
 
-function parseSha256(value: unknown, label: string): string {
-  if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)) {
-    throw new Error(`${label} has an invalid SHA-256`)
+function parseSha256Digest(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(value)) {
+    throw new Error(`${label} is missing a usable SHA-256 digest`)
   }
-  return value
+  return value.slice('sha256:'.length)
 }
 
-function parseArtifact(value: unknown, label: string): ReleaseArtifact {
+export function parseGitHubRelease(value: unknown, label = 'GitHub release'): GitHubRelease {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`invalid ${label}`)
   const raw = value as Record<string, unknown>
-  if (typeof raw.url !== 'string' || !raw.url.trim()) throw new Error(`${label} is missing a URL`)
-  return { url: raw.url, sha256: parseSha256(raw.sha256, label) }
+  const tagName = nonEmptyString(raw.tag_name, `${label}.tag_name`)
+  if (raw.draft !== false || raw.prerelease !== false) throw new Error(`${label} must be a published stable release`)
+  if (!Array.isArray(raw.assets)) throw new Error(`${label}.assets must be an array`)
+
+  const assets = raw.assets.map((value, index) => {
+    const assetLabel = `${label}.assets[${index}]`
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`invalid ${assetLabel}`)
+    const asset = value as Record<string, unknown>
+    return {
+      name: nonEmptyString(asset.name, `${assetLabel}.name`),
+      browser_download_url: nonEmptyString(asset.browser_download_url, `${assetLabel}.browser_download_url`),
+      digest: asset.digest === null || asset.digest === undefined
+        ? asset.digest as null | undefined
+        : nonEmptyString(asset.digest, `${assetLabel}.digest`),
+    }
+  })
+
+  return { tag_name: tagName, draft: false, prerelease: false, assets }
 }
 
-function parseArtifactMap(value: unknown, label: string, allowPortable: false): TargetArtifactMap
-function parseArtifactMap(value: unknown, label: string, allowPortable: true): SkillArtifactMap
-function parseArtifactMap(
-  value: unknown,
-  label: string,
-  allowPortable: boolean,
-): TargetArtifactMap | SkillArtifactMap {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`)
-  const entries = Object.entries(value as Record<string, unknown>)
-  if (entries.length === 0) throw new Error(`${label} must contain at least one artifact`)
+function stableVersionFromTag(tag: string, label: string): string {
+  const match = /^v(\d+\.\d+\.\d+)$/.exec(tag)
+  if (!match) throw new Error(`${label} tag must be vMAJOR.MINOR.PATCH: ${tag}`)
+  return match[1]
+}
 
-  const artifacts: Record<string, ReleaseArtifact> = {}
-  for (const [key, artifact] of entries) {
-    if (key !== 'portable' && !isTargetKey(key)) throw new Error(`${label} has invalid target ${key}`)
-    if (key === 'portable' && !allowPortable) throw new Error(`${label} cannot publish a portable artifact`)
-    artifacts[key] = parseArtifact(artifact, `${label}.${key}`)
+function artifactFromReleaseAsset(asset: GitHubReleaseAsset, label: string): ReleaseArtifact {
+  return {
+    url: asset.browser_download_url,
+    sha256: parseSha256Digest(asset.digest, label),
+  }
+}
+
+export function parseSkillRepositoryManifest(repository: string, value: unknown): SkillRepositoryMetadata {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${repository} manifest.json is invalid`)
+  }
+  const raw = value as Record<string, unknown>
+  const name = nonEmptyString(raw.name, `${repository} manifest name`)
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error(`${repository} manifest has invalid skill name ${name}`)
+
+  const expectedName = expectedSkillNameFromRepository(repository)
+  if (expectedName && name !== expectedName) {
+    throw new Error(`${repository} manifest identifies ${name}; expected ${expectedName}`)
+  }
+
+  return {
+    name,
+    description: nonEmptyString(raw.description, `${repository} manifest description`),
+    dependencies: parseDependencies(raw.dependencies, `${repository} manifest dependencies`),
+  }
+}
+
+function skillArtifacts(name: string, assets: GitHubReleaseAsset[], repository: string): SkillArtifactMap {
+  const byName = new Map(assets.map((asset) => [asset.name, asset]))
+  const artifacts: SkillArtifactMap = {}
+
+  for (const target of TARGET_KEYS) {
+    const asset = byName.get(`${name}-${target}.zip`)
+    if (asset) artifacts[target] = artifactFromReleaseAsset(asset, `${repository} ${asset.name}`)
+  }
+
+  const portable = byName.get(`${name}.zip`)
+  if (portable) artifacts.portable = artifactFromReleaseAsset(portable, `${repository} ${portable.name}`)
+
+  if (Object.keys(artifacts).length === 0) {
+    throw new Error(`${repository} latest release has no JLS package assets for ${name}`)
   }
   return artifacts
 }
 
-function parseSkillReference(value: unknown, name: string): SkillReference {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`invalid released skill reference ${name}`)
-  const manifestUrl = (value as Record<string, unknown>).manifest_url
-  if (typeof manifestUrl !== 'string' || !manifestUrl.trim()) throw new Error(`${name} skill reference is missing manifest_url`)
-  return { manifest_url: manifestUrl }
+function githubReleaseUrl(repository: string): string {
+  return `https://api.github.com/repos/${repository}/releases/latest`
 }
 
-export function parseReleaseManifest(value: unknown): ReleaseIndex {
-  if (!value || typeof value !== 'object') throw new Error('invalid release manifest')
-  const raw = value as Record<string, unknown>
-
-  if (!raw.installer || typeof raw.installer !== 'object') throw new Error('release manifest is missing installer metadata')
-  const installerRaw = raw.installer as Record<string, unknown>
-  if (typeof installerRaw.version !== 'string' || !semverParts(installerRaw.version)) {
-    throw new Error('invalid installer release version')
-  }
-  const installerArtifacts = parseArtifactMap(installerRaw.artifacts, 'installer release artifacts', false)
-
-  if (!raw.skills || typeof raw.skills !== 'object' || Array.isArray(raw.skills)) {
-    throw new Error('release manifest is missing skill references')
-  }
-  const skills: Record<string, SkillReference> = {}
-  for (const [name, reference] of Object.entries(raw.skills as Record<string, unknown>)) {
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error(`invalid released skill name ${name}`)
-    skills[name] = parseSkillReference(reference, name)
-  }
-
-  return {
-    installer: {
-      version: installerRaw.version,
-      artifacts: installerArtifacts,
-    },
-    skills,
-  }
+function repositoryManifestUrl(repository: string, tag: string): string {
+  return `https://raw.githubusercontent.com/${repository}/${encodeURIComponent(tag)}/manifest.json`
 }
 
-export function parseSkillReleaseManifest(name: string, value: unknown): ReleasedSkill {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`invalid released skill manifest ${name}`)
-  const raw = value as Record<string, unknown>
-  if (raw.name !== name) throw new Error(`released skill manifest for ${name} identifies ${String(raw.name)}`)
-  if (typeof raw.version !== 'string' || !semverParts(raw.version)) throw new Error(`invalid released skill version ${name}`)
-  const description = raw.description === undefined
-    ? undefined
-    : nonEmptyString(raw.description, `released skill ${name}.description`)
-  const dependencies = parseDependencies(raw.dependencies, `released skill ${name}.dependencies`)
-  return {
-    version: raw.version,
-    ...(description ? { description } : {}),
-    ...(dependencies ? { dependencies } : {}),
-    artifacts: parseArtifactMap(raw.artifacts, `released skill ${name} artifacts`, true),
-  }
-}
-
-async function fetchReleaseIndex(
-  manifestUrl: string,
+async function fetchLatestGitHubRelease(
+  repository: string,
   fetcher: FetchLike,
-): Promise<ReleaseIndex | null> {
-  const response = await fetcher(manifestUrl, { headers: { 'user-agent': 'jls' } })
+): Promise<GitHubRelease | null> {
+  const response = await fetcher(githubReleaseUrl(repository), {
+    headers: { 'user-agent': 'jls', accept: 'application/vnd.github+json' },
+  })
   if (response.status === 404) return null
-  if (!response.ok) throw new Error(`stable release check failed with HTTP ${response.status}`)
-  return parseReleaseManifest(await response.json())
+  if (!response.ok) throw new Error(`${repository} release check failed with HTTP ${response.status}`)
+  return parseGitHubRelease(await response.json(), `${repository} latest release`)
 }
 
-export async function fetchStableReleaseManifest(
-  manifestUrl = process.env.JLS_UPDATE_MANIFEST_URL || DEFAULT_RELEASE_MANIFEST_URL,
+async function resolveSkillRepository(
+  repository: string,
+  fetcher: FetchLike,
+): Promise<[string, ReleasedSkill] | null> {
+  const release = await fetchLatestGitHubRelease(repository, fetcher)
+  if (!release) return null
+
+  const version = stableVersionFromTag(release.tag_name, `${repository} latest release`)
+  const manifestResponse = await fetcher(repositoryManifestUrl(repository, release.tag_name), {
+    headers: { 'user-agent': 'jls' },
+  })
+  if (!manifestResponse.ok) {
+    throw new Error(`${repository} manifest lookup for ${release.tag_name} failed with HTTP ${manifestResponse.status}`)
+  }
+
+  const metadata = parseSkillRepositoryManifest(repository, await manifestResponse.json())
+  return [metadata.name, {
+    version,
+    description: metadata.description,
+    ...(metadata.dependencies ? { dependencies: metadata.dependencies } : {}),
+    artifacts: skillArtifacts(metadata.name, release.assets, repository),
+  }]
+}
+
+export async function fetchAvailableSkills(
+  repositories: readonly string[] = SKILL_REPOSITORIES,
   fetcher: FetchLike = fetch,
-): Promise<ReleaseManifest | null> {
-  const index = await fetchReleaseIndex(manifestUrl, fetcher)
-  if (!index) return null
-
+): Promise<ReleaseManifest> {
+  const resolved = await Promise.all(repositories.map((repository) => resolveSkillRepository(repository, fetcher)))
   const skills: Record<string, ReleasedSkill> = {}
-  await Promise.all(Object.entries(index.skills).map(async ([name, reference]) => {
-    const response = await fetcher(reference.manifest_url, { headers: { 'user-agent': 'jls' } })
-    if (response.status === 404) return
-    if (!response.ok) throw new Error(`${name} release check failed with HTTP ${response.status}`)
-    const released = parseSkillReleaseManifest(name, await response.json())
-    skills[name] = released
-  }))
 
-  return { installer: index.installer, skills }
+  for (const entry of resolved) {
+    if (!entry) continue
+    const [name, released] = entry
+    if (skills[name]) throw new Error(`catalog repositories resolve to duplicate skill name ${name}`)
+    skills[name] = released
+  }
+
+  return { skills }
 }
 
 function targetKey(target?: TargetKey): TargetKey {
   return target ?? compiledTarget().key
-}
-
-export function selectInstallerArtifact(manifest: ReleaseManifest | ReleaseIndex, target: TargetKey): ReleaseArtifact {
-  const artifact = manifest.installer.artifacts[target]
-  if (!artifact) throw new Error(`installer release has no ${target} artifact`)
-  return artifact
 }
 
 export function selectSkillArtifact(name: string, released: ReleasedSkill, target: TargetKey): SelectedSkillArtifact {
@@ -306,14 +337,25 @@ export function selectSkillArtifact(name: string, released: ReleasedSkill, targe
 
 export async function checkInstallerUpdate(
   currentVersion: string,
-  manifestUrl = process.env.JLS_UPDATE_MANIFEST_URL || DEFAULT_RELEASE_MANIFEST_URL,
+  repository = INSTALLER_REPOSITORY,
   fetcher: FetchLike = fetch,
   target?: TargetKey,
 ): Promise<InstallerUpdate | null> {
-  const manifest = await fetchReleaseIndex(manifestUrl, fetcher)
-  if (!manifest || compareVersions(manifest.installer.version, currentVersion) <= 0) return null
+  const release = await fetchLatestGitHubRelease(repository, fetcher)
+  if (!release) return null
+
+  const version = stableVersionFromTag(release.tag_name, `${repository} latest release`)
+  if (compareVersions(version, currentVersion) <= 0) return null
+
   const currentTarget = targetKey(target)
-  return { version: manifest.installer.version, artifact: selectInstallerArtifact(manifest, currentTarget) }
+  const assetName = installerAssetName(targetByKey(currentTarget))
+  const asset = release.assets.find((candidate) => candidate.name === assetName)
+  if (!asset) throw new Error(`${repository} latest release has no ${assetName} installer asset`)
+
+  return {
+    version,
+    artifact: artifactFromReleaseAsset(asset, `${repository} ${assetName}`),
+  }
 }
 
 async function downloadVerified(
